@@ -9,16 +9,17 @@ dependencies = [
     "opencv-python>=4.8",
     "torch>=2.0",
     "pillow>=10.0",
-    "shared @ file://${PROJECT_ROOT}/../shared",
+    "shared",
 ]
 
 [project.optional-dependencies]
 all = [
     "insightface>=0.7",
     "onnxruntime-gpu; platform_system == 'Linux'",
+    "onnxruntime; platform_system != 'Linux'",
     "gfpgan",
     "pydub",
-    "torchcrepe",
+    "whisper",
 ]
 
 [build-system]

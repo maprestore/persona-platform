@@ -8,7 +8,7 @@ dependencies = [
     "fastapi>=0.100",
     "uvicorn>=0.20",
     "websockets>=10",
-    "shared @ file://${PROJECT_ROOT}/../shared",
+    "shared",
 ]
 
 [project.optional-dependencies]
