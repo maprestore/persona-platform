@@ -1,0 +1,17 @@
+[project]
+name = "shared"
+version = "0.1.0"
+description = "Shared types, protocols, and utilities"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "typing-extensions>=4.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

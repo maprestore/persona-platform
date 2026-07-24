@@ -1,0 +1,19 @@
+[project]
+name = "scene-composer"
+version = "0.1.0"
+description = "Multi-person & background composition"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "torch>=2.0",
+    "shared @ file://${PROJECT_ROOT}/../shared",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

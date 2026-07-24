@@ -1,0 +1,57 @@
+[project]
+name = "persona-platform"
+version = "0.1.0"
+description = "Real-time identity and persona swapping platform"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Persona Platform Team" },
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "onnxruntime-gpu; platform_system == 'Linux'",
+    "onnxruntime; platform_system != 'Linux'",
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+]
+
+[project.optional-dependencies]
+# persona-swap-core
+swap = [
+    "insightface>=0.7",
+    "onnxruntime",
+    "opencv-python",
+    "pillow",
+    "gfpgan; platform_machine != 'aarch64'",
+]
+# voice
+voice = [
+    "pydub",
+    "torchcrepe",
+    "whisper",
+]
+# sdk
+sdk = [
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "websockets>=10",
+    "redis>=4.0",
+]
+# inference
+engine = [
+    "onnxruntime-gpu; platform_system == 'Linux'",
+    "tensorrt; platform_system == 'Linux'",
+    "coremltools; platform_system == 'Darwin'",
+]
+# all
+all = [
+    "persona-platform[swap,voice,sdk,engine]",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

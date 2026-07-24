@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {"node_id": "cam1", "node_type": "input", "params": {"source": "webcam:0"}},
+    {"node_id": "swap1", "node_type": "face_swap", "params": {"face_source": "my_face.jpg"}},
+    {"node_id": "voice1", "node_type": "voice_convert", "params": {"voice_model": "default"}},
+    {"node_id": "out1", "node_type": "output", "params": {"target": "virtual_camera"}}
+  ],
+  "edges": [
+    ["cam1", "swap1"],
+    ["swap1", "voice1"],
+    ["voice1", "out1"]
+  ]
+}

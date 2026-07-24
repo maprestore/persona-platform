@@ -1,0 +1,22 @@
+[project]
+name = "persona-sdk"
+version = "0.1.0"
+description = "FastAPI-based API server + Python SDK"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "websockets>=10",
+    "shared @ file://${PROJECT_ROOT}/../shared",
+]
+
+[project.optional-dependencies]
+all = ["redis>=4.0", "httpx"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

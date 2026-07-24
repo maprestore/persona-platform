@@ -1,0 +1,29 @@
+[project]
+name = "persona-swap-core"
+version = "0.1.0"
+description = "Real-time face/body/voice swap engine"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "torch>=2.0",
+    "pillow>=10.0",
+    "shared @ file://${PROJECT_ROOT}/../shared",
+]
+
+[project.optional-dependencies]
+all = [
+    "insightface>=0.7",
+    "onnxruntime-gpu; platform_system == 'Linux'",
+    "gfpgan",
+    "pydub",
+    "torchcrepe",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

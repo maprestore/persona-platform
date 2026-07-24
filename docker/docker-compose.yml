@@ -1,0 +1,21 @@
+services:
+  persona-api:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    ports:
+      - "6967:6967"
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - PERSONA_DEVICE=cuda
+    volumes:
+      - ./data:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

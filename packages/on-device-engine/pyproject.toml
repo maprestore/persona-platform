@@ -1,0 +1,24 @@
+[project]
+name = "on-device-engine"
+version = "0.1.0"
+description = "Runtime optimizer: ONNX/TensorRT/CoreML quantization"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "onnxruntime>=1.15",
+    "shared @ file://${PROJECT_ROOT}/../shared",
+]
+
+[project.optional-dependencies]
+all = [
+    "tensorrt; platform_system == 'Linux'",
+    "coremltools; platform_system == 'Darwin'",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
