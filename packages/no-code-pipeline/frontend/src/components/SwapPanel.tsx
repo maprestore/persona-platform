@@ -15,12 +15,16 @@ interface Props {
   onSwap: () => void;
   onSourceFile: (file: File) => void;
   onTargetFile: (file: File) => void;
+  use4k?: boolean;
+  noWatermark?: boolean;
+  onToggle4k?: () => void;
+  onToggleWatermark?: () => void;
 }
 
 export default function SwapPanel({
   sourceImage, targetImage, resultImage, sourceId, targetId, swapping,
   onSourceUpload, onTargetUpload, onSourceId, onTargetId, onSwap,
-  onSourceFile, onTargetFile,
+  onSourceFile, onTargetFile, use4k, noWatermark, onToggle4k, onToggleWatermark,
 }: Props) {
   const sourceRef = useRef<HTMLInputElement>(null);
   const targetRef = useRef<HTMLInputElement>(null);
@@ -95,6 +99,18 @@ export default function SwapPanel({
           <input ref={targetRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], 'target')} />
         </div>
+      </div>
+
+      {/* Options */}
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+          <input type="checkbox" checked={use4k} onChange={onToggle4k} className="accent-indigo-500" />
+          4K HD
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+          <input type="checkbox" checked={!noWatermark} onChange={onToggleWatermark} className="accent-indigo-500" />
+          Watermark
+        </label>
       </div>
 
       {/* Swap Button */}

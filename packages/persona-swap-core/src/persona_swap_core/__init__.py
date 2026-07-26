@@ -1,4 +1,12 @@
 from .engine import PersonaSwapCore
-from .engines import FaceSwapEngine, VoiceConvertEngine
+from .engines import FaceSwapEngine, VoiceConvertEngine, VoiceClonerEngine, LivePortraitEngine, BackgroundRemover, EffectsPipeline
 
-__all__ = ["PersonaSwapCore", "FaceSwapEngine", "VoiceConvertEngine"]
+__all__ = [
+    "PersonaSwapCore",
+    "FaceSwapEngine",
+    "VoiceConvertEngine",
+    "VoiceClonerEngine",
+    "LivePortraitEngine",
+    "BackgroundRemover",
+    "EffectsPipeline",
+]

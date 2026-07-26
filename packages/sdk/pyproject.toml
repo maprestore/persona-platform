@@ -9,6 +9,11 @@ dependencies = [
     "uvicorn>=0.20",
     "websockets>=10",
     "shared",
+    "python-multipart",
+    "httpx>=0.25",
+    "numpy>=1.24",
+    "persona-swap-core",
+    "magiclip",
 ]
 
 [project.optional-dependencies]

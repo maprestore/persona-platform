@@ -17,6 +17,9 @@ dependencies = [
     "onnxruntime; platform_system != 'Linux'",
     "fastapi>=0.100",
     "uvicorn>=0.20",
+    "librosa>=0.10",
+    "scipy>=1.10",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]

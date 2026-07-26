@@ -25,6 +25,46 @@ export default defineConfig({
         target: 'http://localhost:6967',
         changeOrigin: true,
       },
+      '/swap-video': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/live-portrait': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/background-remove': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/apply-filter': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/filters': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/voice-clone': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/tuning': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/translate': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/watermark': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
+      '/features': {
+        target: 'http://localhost:6967',
+        changeOrigin: true,
+      },
       '/cameras': {
         target: 'http://localhost:6967',
         changeOrigin: true,
