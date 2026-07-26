@@ -10,7 +10,8 @@ from pathlib import Path
 import numpy as np
 from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 UPLOAD_DIR = Path("uploads")
@@ -172,6 +173,17 @@ def _detect_cameras() -> list[dict]:
         except (OSError, PermissionError):
             info["type"] = "inaccessible"
         cameras.append(info)
+
+    if cameras:
+        return cameras
+
+    cameras.append({
+        "device": "pyvirtualcam",
+        "name": "pyvirtualcam (ManyCam/OBS/Virtual Camera)",
+        "type": "virtual",
+        "driver": "pyvirtualcam",
+    })
+
     return cameras
 
 
@@ -187,8 +199,12 @@ def _parse_color(color_str: str | None) -> tuple[int, int, int] | None:
     return None
 
 
+FRONTEND_DIST = Path(__file__).parent.parent.parent.parent / "no-code-pipeline" / "frontend" / "dist"
+FRONTEND_DEV = Path(__file__).parent.parent.parent.parent / "no-code-pipeline" / "frontend"
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Persona Platform SDK", version="0.1.0")
+    app = FastAPI(title="Persona Studio", version="0.1.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -197,6 +213,20 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    frontend_dist = FRONTEND_DIST
+    frontend_dev = FRONTEND_DEV
+    frontend_index = frontend_dist / "index.html"
+
+    if frontend_dist.exists() and frontend_index.exists():
+        app.mount("/ui", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+
+        @app.get("/")
+        async def root():
+            return HTMLResponse(
+                '<html><head><meta http-equiv="refresh" content="0;url=/ui/"></head>'
+                "<body><a href='/ui/'>Open Persona Studio</a></body></html>"
+            )
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -233,16 +263,14 @@ def create_app() -> FastAPI:
     @app.post("/virtual-cam/start")
     async def start_virtual_cam(req: VirtualCamRequest):
         try:
-            from persona_swap_core.virtual_cam import V4L2VirtualCamera
-            cam = V4L2VirtualCamera(req.device, req.width, req.height, req.fps)
-            if cam.is_available():
-                ok = cam.start()
-                if ok:
-                    _engine_state._virtual_cam = cam
-                    _engine_state._cam_active = True
-                    return {"status": "ok", "device": req.device, "resolution": f"{req.width}x{req.height}", "fps": req.fps}
-                return {"status": "error", "message": "Failed to start virtual camera"}
-            return {"status": "error", "message": f"Device {req.device} not found or not a virtual output"}
+            from persona_swap_core.virtual_cam import VirtualCamera
+            cam = VirtualCamera(name=req.device, width=req.width, height=req.height, fps=req.fps)
+            ok = cam.start()
+            if ok:
+                _engine_state._virtual_cam = cam
+                _engine_state._cam_active = True
+                return {"status": "ok", "device": req.device, "resolution": f"{req.width}x{req.height}", "fps": req.fps}
+            return {"status": "error", "message": "Failed to start virtual camera"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -254,7 +282,8 @@ def create_app() -> FastAPI:
     @app.get("/virtual-cam/status")
     async def virtual_cam_status():
         active = _engine_state._cam_active
-        device = _engine_state._virtual_cam.device if _engine_state._virtual_cam else None
+        vcam = _engine_state._virtual_cam
+        device = vcam.name if vcam else None
         return {"active": active, "device": device}
 
     @app.post("/swap", response_model=SwapResponse)

@@ -15,6 +15,7 @@ setup(
     install_requires=[
         _local("shared"),
         _local("persona-swap-core"),
+        _local("magiclip"),
         _local("sdk"),
     ],
     entry_points={
