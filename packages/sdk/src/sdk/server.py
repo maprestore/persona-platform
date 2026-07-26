@@ -202,6 +202,314 @@ def _parse_color(color_str: str | None) -> tuple[int, int, int] | None:
 FRONTEND_DIST = Path(__file__).parent.parent.parent.parent / "no-code-pipeline" / "frontend" / "dist"
 FRONTEND_DEV = Path(__file__).parent.parent.parent.parent / "no-code-pipeline" / "frontend"
 
+WEBPAGE_INDEX = """\
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Persona Studio</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0f0f13;color:#e4e4e7;min-height:100vh}
+.header{background:#1a1a24;border-bottom:1px solid #2a2a35;padding:16px 24px;display:flex;align-items:center;gap:12px}
+.header h1{font-size:20px;font-weight:600;background:linear-gradient(135deg,#818cf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.logo{width:32px;height:32px;background:#4f46e5;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:24px;max-width:960px;margin:0 auto}
+.card{background:#1a1a24;border:1px solid #2a2a35;border-radius:12px;padding:20px;text-decoration:none;color:inherit;transition:border-color .2s}
+.card:hover{border-color:#4f46e5}
+.card-icon{font-size:32px;margin-bottom:12px}
+.card h3{font-size:16px;font-weight:600;margin-bottom:6px}
+.card p{font-size:13px;color:#a1a1aa;line-height:1.5}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:500;margin-top:8px}
+.badge-green{background:#05966920;color:#34d399;border:1px solid #05966940}
+.footer{text-align:center;padding:24px;color:#52525b;font-size:13px}
+</style></head><body>
+<div class="header">
+<div class="logo">&#x1f3ac;</div>
+<h1>Persona Studio</h1>
+</div>
+<div class="grid">
+<a href="/cam" class="card">
+<div class="card-icon">&#x1f4f7;</div>
+<h3>Live Webcam</h3>
+<p>Real-time face swap using your camera &mdash; share this tab in any video call</p>
+<div class="badge badge-green">Works with screen share</div>
+</a>
+<a href="/ui/" class="card">
+<div class="card-icon">&#x1f3a8;</div>
+<h3>Persona Studio UI</h3>
+<p>Full-featured studio with swap, filters, background removal, and more</p>
+</a>
+<a href="/docs" class="card" onclick="event.preventDefault();alert('API endpoints:\\n/health - Server status\\n/swap - Face swap\\n/upload - Upload files\\n/cameras - List cameras\\n/virtual-cam/* - Virtual camera control\\n/live-portrait - Animate portraits\\n/background-remove - BG removal\\n/apply-filter - Filters\\n/voice-clone/* - Voice cloning\\n/translate - AI translation\\n/tuning - Advanced tuning')">
+<div class="card-icon">&#x1f4e1;</div>
+<h3>API</h3>
+<p>REST API at / for programmatic access &mdash; all endpoints available</p>
+</a>
+</div>
+<div class="footer">Persona Studio v0.1.0 &mdash; Face swap for video calls</div>
+</body></html>
+"""
+
+WEBPAGE_CAM = """\
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Persona Studio - Live Cam</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#000;color:#fff;overflow:hidden;height:100dvh;display:flex;flex-direction:column}
+.video-container{flex:1;display:flex;align-items:center;justify-content:center;position:relative;background:#0a0a0a;min-height:0}
+.video-container video{max-width:100%;max-height:100%;object-fit:contain;border-radius:0}
+#sourceVideo{display:none}
+#resultVideo{width:100%;height:100%;object-fit:contain}
+.overlay{position:absolute;top:16px;left:16px;right:16px;display:flex;justify-content:space-between;pointer-events:none}
+.status-badge{padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;backdrop-filter:blur(8px)}
+.status-ok{background:#05966940;color:#34d399;border:1px solid #05966980}
+.status-warn{background:#d9770640;color:#fbbf24;border:1px solid #d9770680}
+.status-err{background:#dc262640;color:#f87171;border:1px solid #dc262680}
+.controls{background:#1a1a24;border-top:1px solid #2a2a35;padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.controls button{padding:10px 20px;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;flex-shrink:0}
+.btn-start{background:#4f46e5;color:#fff}
+.btn-start:hover{background:#4338ca}
+.btn-start:disabled{opacity:.4;cursor:not-allowed}
+.btn-stop{background:#dc2626;color:#fff}
+.btn-stop:hover{background:#b91c1c}
+.btn-secondary{background:#2a2a35;color:#e4e4e7}
+.btn-secondary:hover{background:#3a3a45}
+.controls select{background:#2a2a35;color:#e4e4e7;border:1px solid #3a3a45;border-radius:6px;padding:8px 12px;font-size:13px;flex:1;min-width:100px}
+.controls label{font-size:12px;color:#a1a1aa;display:flex;align-items:center;gap:8px}
+.controls input[type=file]{display:none}
+.file-label{padding:8px 14px;background:#2a2a35;border-radius:6px;font-size:12px;color:#a1a1aa;cursor:pointer;border:1px dashed #3a3a45;flex-shrink:0}
+.file-label:hover{background:#3a3a45}
+.swap-toggle{display:flex;gap:4px;background:#2a2a35;border-radius:8px;padding:3px}
+.swap-toggle button{padding:6px 14px;border:none;border-radius:6px;font-size:12px;cursor:pointer;transition:all .15s;background:transparent;color:#a1a1aa;font-weight:500}
+.swap-toggle button.active{background:#4f46e5;color:#fff}
+#mirrorToggle{padding:8px;background:transparent;border:1px solid #3a3a45;border-radius:6px;color:#a1a1aa;cursor:pointer;font-size:16px}
+#mirrorToggle.active{border-color:#4f46e5;color:#4f46e5}
+.hint{text-align:center;font-size:12px;color:#52525b;padding:6px;border-top:1px solid #1a1a24;background:#0f0f13}
+@media(max-width:480px){.controls{padding:8px 10px;gap:6px}.controls button{padding:8px 14px;font-size:13px}}
+</style></head><body>
+<div class="video-container">
+<video id="sourceVideo" autoplay playsinline muted></video>
+<canvas id="resultCanvas" style="width:100%;height:100%;object-fit:contain"></canvas>
+<div class="overlay">
+<span id="statusBadge" class="status-badge status-warn">Starting camera...</span>
+<span id="fpsBadge" class="status-badge status-warn">0 FPS</span>
+</div>
+</div>
+<div class="controls">
+<button id="startBtn" class="btn-start">Start Camera</button>
+<button id="stopBtn" class="btn-stop" style="display:none">Stop</button>
+<div class="swap-toggle">
+<button id="modeLive" class="active">Live</button>
+<button id="modePhoto">Photo</button>
+</div>
+<label for="sourceInput" class="file-label" id="fileLabel">+ Source Face</label>
+<input type="file" id="sourceInput" accept="image/*">
+<label>
+<select id="cameraSelect"><option value="">Default camera</option></select>
+</label>
+<button id="mirrorToggle">&#x1f53a;</button>
+</div>
+<div id="facingHint" class="hint">&#x1f4f1; Use front camera for selfie &bull; Screen share this tab in your video call app</div>
+<script>
+const WS_URL = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/stream';
+const API_BASE = '';
+let ws=null, ctx=null, stream=null, animFrame=null, sourceFaceId=null;
+let mirror=true, mode='live', lastTime=0, fps=0, frameCount=0, fpsInterval=null;
+const srcVideo=document.getElementById('sourceVideo');
+const resultCanvas=document.getElementById('resultCanvas');
+const statusBadge=document.getElementById('statusBadge');
+const fpsBadge=document.getElementById('fpsBadge');
+const startBtn=document.getElementById('startBtn');
+const stopBtn=document.getElementById('stopBtn');
+const sourceInput=document.getElementById('sourceInput');
+const fileLabel=document.getElementById('fileLabel');
+const cameraSelect=document.getElementById('cameraSelect');
+const mirrorToggle=document.getElementById('mirrorToggle');
+
+function setStatus(text,type){
+ statusBadge.textContent=text;
+ statusBadge.className='status-badge status-'+type;
+}
+
+function setFps(val){
+ fpsBadge.textContent=val+' FPS';
+ fpsBadge.className='status-badge '+(val>20?'status-ok':'status-warn');
+}
+
+function connectWs(){
+ if(ws)try{ws.close()}catch(e){}
+ ws=new WebSocket(WS_URL);
+ ws.onopen=()=>{setStatus('Connected','ok')};
+ ws.onmessage=(ev)=>{
+  if(ev.data instanceof Blob){
+   const url=URL.createObjectURL(ev.data);
+   const img=new Image();
+   img.onload=()=>{
+    ctx||(resultCanvas.getContext('2d'));
+    resultCanvas.width=img.width;
+    resultCanvas.height=img.height;
+    ctx=resultCanvas.getContext('2d');
+    if(mirror){
+     ctx.save();
+     ctx.translate(img.width,0);
+     ctx.scale(-1,1);
+     ctx.drawImage(img,0,0);
+     ctx.restore();
+    }else{
+     ctx.drawImage(img,0,0);
+    }
+    URL.revokeObjectURL(url);
+    frameCount++;
+   };
+   img.src=url;
+  }
+ };
+ ws.onerror=()=>{setStatus('Disconnected','err')};
+ ws.onclose=()=>{setStatus('Disconnected','err');ws=null};
+}
+
+function sendFrame(video){
+ if(!ws||ws.readyState!==1||!video.videoWidth)return;
+ const c=document.createElement('canvas');
+ c.width=Math.min(video.videoWidth,640);
+ c.height=Math.min(video.videoHeight,480);
+ const cx=c.getContext('2d');
+ cx.drawImage(video,0,0,c.width,c.height);
+ c.toBlob(blob=>{if(ws&&ws.readyState===1)ws.send(blob)},'image/jpeg',0.7);
+}
+
+async function startCamera(){
+ try{
+  const facing=cameraSelect.value||'user';
+  stream=await navigator.mediaDevices.getUserMedia({
+   video:{facingMode:facing,width:{ideal:640},height:{ideal:480}},
+   audio:false
+  });
+  srcVideo.srcObject=stream;
+  await srcVideo.play();
+  connectWs();
+  setStatus('Running','ok');
+  startBtn.style.display='none';
+  stopBtn.style.display='';
+  let last=performance.now();
+  function loop(now){
+   if(!srcVideo.srcObject)return;
+   sendFrame(srcVideo);
+   const dt=now-last;
+   if(dt>=1000){setFps(frameCount);frameCount=0;last=now}
+   animFrame=requestAnimationFrame(loop);
+  }
+  animFrame=requestAnimationFrame(loop);
+ }catch(e){
+  setStatus('Camera error: '+e.message,'err');
+ }
+}
+
+function stopCamera(){
+ if(animFrame){cancelAnimationFrame(animFrame);animFrame=null}
+ if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+ srcVideo.srcObject=null;
+ if(ws){try{ws.close()}catch(e){}ws=null}
+ ctx=null;
+ resultCanvas.getContext('2d').clearRect(0,0,resultCanvas.width,resultCanvas.height);
+ resultCanvas.width=0;resultCanvas.height=0;
+ setStatus('Stopped','warn');
+ startBtn.style.display='';
+ stopBtn.style.display='none';
+}
+
+async function uploadSourceFace(file){
+ const form=new FormData();
+ form.append('file',file);
+ try{
+  const res=await fetch(API_BASE+'/upload',{method:'POST',body:form});
+  const data=await res.json();
+  sourceFaceId=data.file_id;
+  fileLabel.textContent='\\u2705 '+file.name;
+  fileLabel.style.borderColor='#34d399';
+  setStatus('Source face loaded','ok');
+  if(mode==='photo'){await uploadTargetAndSwap();}
+ }catch(e){
+  fileLabel.textContent='Upload failed';
+  setStatus('Upload error','err');
+ }
+}
+
+async function uploadAndSwap(imgData){
+ if(!sourceFaceId)return;
+ try{
+  const blob=await new Promise(r=>imgData.toBlob(r,'image/png'));
+  const form=new FormData();
+  form.append('file',new File([blob],'selfie.png'));
+  const up=await fetch(API_BASE+'/upload',{method:'POST',body:form});
+  const upData=await up.json();
+  const res=await fetch(API_BASE+'/swap',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({source_id:sourceFaceId,target_id:upData.file_id,no_watermark:true})
+  });
+  const swapData=await res.json();
+  if(swapData.output_url){
+   const img=new Image();
+   img.onload=()=>{
+    resultCanvas.width=img.width;
+    resultCanvas.height=img.height;
+    ctx=resultCanvas.getContext('2d');
+    if(mirror){ctx.save();ctx.translate(img.width,0);ctx.scale(-1,1);ctx.drawImage(img,0,0);ctx.restore()}
+    else ctx.drawImage(img,0,0);
+   };
+   img.src=API_BASE+swapData.output_url;
+  }
+ }catch(e){console.error(e)}
+}
+
+sourceInput.addEventListener('change',e=>{
+ if(e.target.files[0])uploadSourceFace(e.target.files[0]);
+});
+
+startBtn.addEventListener('click',startCamera);
+stopBtn.addEventListener('click',stopCamera);
+
+mirrorToggle.addEventListener('click',()=>{
+ mirror=!mirror;
+ mirrorToggle.classList.toggle('active');
+});
+
+document.getElementById('modeLive').addEventListener('click',()=>{
+ mode='live';
+ document.getElementById('modeLive').classList.add('active');
+ document.getElementById('modePhoto').classList.remove('active');
+ setStatus('Live mode','ok');
+});
+
+document.getElementById('modePhoto').addEventListener('click',()=>{
+ mode='photo';
+ document.getElementById('modePhoto').classList.add('active');
+ document.getElementById('modeLive').classList.remove('active');
+ if(sourceFaceId){
+  const c=document.createElement('canvas');
+  c.width=srcVideo.videoWidth||640;
+  c.height=srcVideo.videoHeight||480;
+  const cx=c.getContext('2d');
+  cx.drawImage(srcVideo,0,0);
+  uploadAndSwap(c);
+ }
+ setStatus('Photo mode: capture & swap','warn');
+});
+
+// Enumerate cameras
+navigator.mediaDevices.enumerateDevices().then(devs=>{
+ devs.filter(d=>d.kind==='videoinput').forEach((d,i)=>{
+  const opt=document.createElement('option');
+  opt.value=d.deviceId;
+  opt.text=d.label||'Camera '+(i+1);
+  cameraSelect.appendChild(opt);
+ });
+}).catch(()=>{});
+
+setStatus('Click Start Camera','warn');
+</script>
+</body></html>
+"""
+
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Persona Studio", version="0.1.0")
@@ -220,13 +528,21 @@ def create_app() -> FastAPI:
 
     if frontend_dist.exists() and frontend_index.exists():
         app.mount("/ui", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
-
-        @app.get("/")
-        async def root():
+    else:
+        @app.get("/ui")
+        async def ui_redirect():
             return HTMLResponse(
-                '<html><head><meta http-equiv="refresh" content="0;url=/ui/"></head>'
-                "<body><a href='/ui/'>Open Persona Studio</a></body></html>"
+                '<html><head><meta http-equiv="refresh" content="0;url=/cam"></head>'
+                "<body><a href='/cam'>Open Webcam Face Swap</a></body></html>"
             )
+
+    @app.get("/")
+    async def root():
+        return HTMLResponse(WEBPAGE_INDEX)
+
+    @app.get("/cam")
+    async def webcam_page():
+        return HTMLResponse(WEBPAGE_CAM)
 
     @app.on_event("shutdown")
     async def shutdown():
