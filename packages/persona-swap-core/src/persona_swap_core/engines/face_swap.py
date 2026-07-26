@@ -13,6 +13,10 @@ class FaceSwapEngine:
         self._device = "cpu"
         self._use_4k = False
 
+    @property
+    def device(self) -> str:
+        return self._device
+
     def load(self, device: str = "cuda", use_4k: bool = False) -> None:
         self._device = device
         self._use_4k = use_4k
@@ -93,7 +97,7 @@ class FaceSwapEngine:
                 swapped = self._smooth_edges(swapped, tface, tuning.smoothness)
 
             if tuning.edge_feathering > 0:
-                swapped = self._feather_edges(swapped, tface, tuning.edge_feathering)
+                swapped = self._feather_edges(swapped, tface, target_img, tuning.edge_feathering)
 
             result = swapped
 
@@ -193,6 +197,7 @@ class FaceSwapEngine:
         self,
         image: npt.NDArray[np.uint8],
         face: dict,
+        original: npt.NDArray[np.uint8],
         feather: float,
     ) -> npt.NDArray[np.uint8]:
         try:
@@ -210,7 +215,6 @@ class FaceSwapEngine:
             mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
 
             mask_3ch = np.stack([mask] * 3, axis=-1)
-            original = image.copy()
             result = (image * mask_3ch + original * (1 - mask_3ch)).astype(np.uint8)
             return result
         except (ImportError, Exception):

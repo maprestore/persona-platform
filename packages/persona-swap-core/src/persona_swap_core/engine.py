@@ -16,6 +16,8 @@ class PersonaSwapCore(SwapEngine):
         self._effects = EffectsPipeline()
         self._loaded = False
         self._source_embedding: npt.NDArray | None = None
+        self._source_image: npt.NDArray | None = None
+        self._source_faces: list[dict] | None = None
         self._tuning: TuningParams | None = None
         self._use_watermark: bool = True
         self._use_4k: bool = False
@@ -28,10 +30,16 @@ class PersonaSwapCore(SwapEngine):
         self._background.load(device)
         self._loaded = True
 
-    def set_source(self, image: npt.NDArray[np.uint8]) -> None:
+    def set_source(self, image: npt.NDArray[np.uint8]) -> bool:
         faces = self._face.detect(image)
         if faces:
             self._source_embedding = faces[0]["embedding"]
+            self._source_image = image
+            self._source_faces = faces
+            return True
+        self._source_image = image
+        self._source_faces = None
+        return False
 
     def set_tuning(self, tuning: TuningParams) -> None:
         self._tuning = tuning
@@ -42,12 +50,15 @@ class PersonaSwapCore(SwapEngine):
     def set_4k_mode(self, enabled: bool) -> None:
         self._use_4k = enabled
         if self._loaded:
-            self._face.load(self._face._device, use_4k=enabled)
+            self._face.load(device=self._face.device, use_4k=enabled)
 
     def swap(self, source: VideoFrame, target: VideoFrame) -> VideoFrame:
         if not self._loaded:
             return target
-        swapped = self._face.swap(source.image, target.image, tuning=self._tuning)
+        if self._source_faces is not None:
+            swapped = self._face.swap(source.image, target.image, source_faces=self._source_faces, tuning=self._tuning)
+        else:
+            swapped = self._face.swap(source.image, target.image, tuning=self._tuning)
 
         if self._use_watermark:
             from .watermark import add_watermark
@@ -55,6 +66,38 @@ class PersonaSwapCore(SwapEngine):
 
         target.image = swapped
         return target
+
+    def swap_with_options(
+        self,
+        source: VideoFrame,
+        target: VideoFrame,
+        tuning: TuningParams | None = None,
+        use_4k: bool = False,
+        no_watermark: bool = False,
+    ) -> VideoFrame:
+        if not self._loaded:
+            return target
+        
+        # Apply 4k mode temporarily
+        if use_4k and not self._use_4k:
+            self._face.load(self._face._device, use_4k=True)
+        
+        try:
+            if self._source_faces is not None:
+                swapped = self._face.swap(source.image, target.image, source_faces=self._source_faces, tuning=tuning or self._tuning)
+            else:
+                swapped = self._face.swap(source.image, target.image, tuning=tuning or self._tuning)
+
+            if not no_watermark and self._use_watermark:
+                from .watermark import add_watermark
+                swapped = add_watermark(swapped)
+
+            target.image = swapped
+            return target
+        finally:
+            # Restore 4k mode
+            if use_4k and not self._use_4k:
+                self._face.load(self._face._device, use_4k=False)
 
     def swap_batch(
         self,

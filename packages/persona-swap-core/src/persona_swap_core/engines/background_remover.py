@@ -19,12 +19,17 @@ class BackgroundRemover:
         image: npt.NDArray[np.uint8],
         method: str = "auto",
     ) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
-        if method == "rembg":
-            return self._remove_rembg(image)
-        elif method == "cv2":
-            return self._remove_cv2(image)
-        else:
-            return self._remove_auto(image)
+        try:
+            if method == "rembg":
+                return self._remove_rembg(image)
+            elif method == "cv2":
+                return self._remove_cv2(image)
+            else:
+                return self._remove_auto(image)
+        except (ImportError, Exception):
+            h, w = image.shape[:2]
+            mask = np.ones((h, w), dtype=np.uint8) * 255
+            return mask, image
 
     def replace_background(
         self,
@@ -116,7 +121,12 @@ class BackgroundRemover:
     def _remove_cv2(
         self, image: npt.NDArray[np.uint8]
     ) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
-        import cv2
+        try:
+            import cv2
+        except ImportError:
+            h, w = image.shape[:2]
+            mask = np.ones((h, w), dtype=np.uint8) * 255
+            return mask, image
 
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)

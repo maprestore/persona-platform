@@ -9,6 +9,8 @@ class VoiceConvertEngine:
         self._model = None
         self._device = "cpu"
         self._crepe_model = None
+        self._samples: dict[str, npt.NDArray[np.float32]] = {}
+        self._sample_rates: dict[str, int] = {}
 
     def load(self, device: str = "cuda") -> None:
         self._device = device
@@ -118,3 +120,5 @@ class VoiceConvertEngine:
     def unload(self) -> None:
         self._model = None
         self._crepe_model = None
+        self._samples.clear()
+        self._sample_rates.clear()

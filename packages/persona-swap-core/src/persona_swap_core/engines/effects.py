@@ -238,7 +238,10 @@ def cv2_add_weighted(
 
 
 def convolve2d(img: npt.NDArray[np.uint8], kernel: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:
-    from scipy.ndimage import convolve
+    try:
+        from scipy.ndimage import convolve
+    except ImportError:
+        return img
     if len(img.shape) == 3:
         result = np.zeros_like(img)
         for c in range(img.shape[2]):

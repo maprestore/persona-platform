@@ -119,7 +119,17 @@ class LivePortraitEngine:
             if len(faces) == 0:
                 return None
 
-            return np.array(faces[0], dtype=np.float32)
+            x, y, w, h = faces[0]
+            # Return landmarks-like structure: 5 key points (left_eye, right_eye, nose, left_mouth, right_mouth)
+            # Using face bbox to approximate
+            landmarks = np.array([
+                [x + w * 0.3, y + h * 0.35],  # left eye
+                [x + w * 0.7, y + h * 0.35],  # right eye
+                [x + w * 0.5, y + h * 0.55],  # nose
+                [x + w * 0.35, y + h * 0.75], # left mouth
+                [x + w * 0.65, y + h * 0.75], # right mouth
+            ], dtype=np.float32)
+            return landmarks
         except Exception:
             return None
 
@@ -132,21 +142,38 @@ class LivePortraitEngine:
     ) -> npt.NDArray[np.uint8]:
         try:
             import cv2
-            sx, sy, sw, sh = src_pts
-            dx, dy, dw, dh = dst_pts
+            # src_pts and dst_pts are now 5 landmarks each
+            # Create source rect from landmarks (bounding box of landmarks)
+            src_x = src_pts[:, 0]
+            src_y = src_pts[:, 1]
+            sx, sy = src_x.min(), src_y.min()
+            sw, sh = src_x.max() - sx, src_y.max() - sy
+            
+            dst_x = dst_pts[:, 0]
+            dst_y = dst_pts[:, 1]
+            dx, dy = dst_x.min(), dst_y.min()
+            dw, dh = dst_x.max() - dx, dst_y.max() - dy
+            
+            # Use landmarks directly for perspective transform
+            # Take 4 corners from the 5 landmarks (left_eye, right_eye, left_mouth, right_mouth)
+            src_rect = np.array([
+                src_pts[0],  # left eye
+                src_pts[1],  # right eye
+                src_pts[3],  # left mouth
+                src_pts[4],  # right mouth
+            ], dtype=np.float32)
+            
+            dst_rect = np.array([
+                dst_pts[0],
+                dst_pts[1],
+                dst_pts[3],
+                dst_pts[4],
+            ], dtype=np.float32)
+            
+            # Blend towards destination
+            blended_rect = dst_rect * intensity + src_rect * (1 - intensity)
 
-            src_rect = np.array([[sx, sy], [sx + sw, sy], [sx + sw, sy + sh], [sx, sy + sh]], dtype=np.float32)
-            dst_rect = np.array(
-                [
-                    [dx + (sx - dx) * (1 - intensity), dy + (sy - dy) * (1 - intensity)],
-                    [dx + dw + (sx + sw - dx - dw) * (1 - intensity), dy + (sy - dy) * (1 - intensity)],
-                    [dx + dw + (sx + sw - dx - dw) * (1 - intensity), dy + dh + (sy + sh - dy - dh) * (1 - intensity)],
-                    [dx + (sx - dx) * (1 - intensity), dy + dh + (sy + sh - dy - dh) * (1 - intensity)],
-                ],
-                dtype=np.float32,
-            )
-
-            matrix = cv2.getPerspectiveTransform(src_rect, dst_rect)
+            matrix = cv2.getPerspectiveTransform(src_rect, blended_rect)
             result = cv2.warpPerspective(source, matrix, (source.shape[1], source.shape[0]))
             return result
         except Exception:

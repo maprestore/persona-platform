@@ -137,9 +137,10 @@ class V4L2VirtualCamera:
             return False
 
     def _set_format(self) -> bool:
+        # Use YU12 (I420) format which matches YUV420 planar
         fmt = struct.pack(
             "IIIIIIiI16sIIiIIiI",
-            2, self.width, self.height, 0x59455247, 0, 0, 0, 0,
+            2, self.width, self.height, 0x32315559, 0, 0, 0, 0,
             b"\x00" * 16, 0, 0, 0, 0, 0, 0, 0,
         )
         try:
@@ -169,7 +170,8 @@ class V4L2VirtualCamera:
 
             if len(frame.shape) == 3 and frame.shape[2] == 3:
                 import cv2
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2YUV420)
+                # Convert RGB to YUV420 (I420) planar format
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2YUV_I420)
 
             os.write(self._fd, frame.tobytes())
             return True

@@ -424,6 +424,7 @@ async function uploadSourceFace(file){
   const res=await fetch(API_BASE+'/upload',{method:'POST',body:form});
   const data=await res.json();
   sourceFaceId=data.file_id;
+  const setRes=await fetch(API_BASE+'/set-source',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'file_id='+encodeURIComponent(data.file_id)});
   fileLabel.textContent='\\u2705 '+file.name;
   fileLabel.style.borderColor='#34d399';
   setStatus('Source face loaded','ok');
@@ -623,15 +624,16 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=400, detail="Cannot read target image")
 
             engine = _engine_state.get_engine()
-            if req.use_4k:
-                engine.set_4k_mode(True)
-            if req.no_watermark:
-                engine.set_watermark(False)
 
-            from shared.types import VideoFrame
+            from shared.types import VideoFrame, TuningParams
             source_frame = VideoFrame(image=source_img)
             target_frame = VideoFrame(image=target_img)
-            result_frame = engine.swap(source_frame, target_frame)
+            tuning = TuningParams()  # Use default tuning
+            # Pass settings directly to swap instead of modifying engine state
+            result_frame = engine.swap_with_options(
+                source_frame, target_frame, tuning=tuning,
+                use_4k=req.use_4k, no_watermark=req.no_watermark
+            )
 
             ext = ".png"
             if req.use_4k:
@@ -692,7 +694,7 @@ def create_app() -> FastAPI:
                 if not ret:
                     break
                 target_frame = VideoFrame(image=frame)
-                result_frame = engine.swap(source_frame, target_frame)
+                result_frame = engine.swap_with_options(source_frame, target_frame)
                 out.write(result_frame.image)
                 frames_processed += 1
 
@@ -956,6 +958,24 @@ def create_app() -> FastAPI:
         file_path.write_bytes(content)
         return {"file_id": file_id, "filename": file.filename, "size": len(content), "mime": file.content_type or "application/octet-stream"}
 
+    @app.post("/set-source")
+    async def set_source(file_id: str = Form(...)):
+        file_path = UPLOAD_DIR / file_id
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+        try:
+            import cv2
+            img = cv2.imread(str(file_path))
+            if img is None:
+                raise HTTPException(status_code=400, detail="Cannot read image")
+            engine = _engine_state.get_engine()
+            ok = engine.set_source(img)
+            return {"status": "ok", "faces_detected": ok}
+        except ImportError:
+            raise HTTPException(status_code=500, detail="opencv-python not installed")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.get("/files/{file_id}")
     async def get_file(file_id: str):
         file_path = UPLOAD_DIR / file_id
@@ -983,8 +1003,10 @@ def create_app() -> FastAPI:
                     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if img is not None:
                         from shared.types import VideoFrame
-                        frame = VideoFrame(image=img)
-                        result = engine.swap(frame, frame)
+                        target_frame = VideoFrame(image=img)
+                        # Swap stored source face with incoming target frame
+                        source_frame = VideoFrame(image=np.zeros_like(img))  # placeholder, engine uses _source_faces
+                        result = engine.swap(source_frame, target_frame)
 
                         if _engine_state._cam_active and _engine_state._virtual_cam:
                             try:
