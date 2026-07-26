@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: #030712;
+  color: #f3f4f6;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111827;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+@layer components {
+  .card {
+    @apply bg-gray-900 bg-opacity-80 backdrop-blur-sm border border-gray-800 rounded-xl;
+  }
+  .card-hover {
+    @apply bg-gray-900 bg-opacity-80 backdrop-blur-sm border border-gray-800 rounded-xl hover:border-gray-700 hover:bg-gray-800 hover:bg-opacity-80 transition-all duration-200;
+  }
+  .btn-primary {
+    @apply bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium transition-all duration-200 active:scale-95;
+  }
+  .btn-secondary {
+    @apply bg-gray-800 hover:bg-gray-700 text-gray-200 px-4 py-2 rounded-lg font-medium border border-gray-700 transition-all duration-200 active:scale-95;
+  }
+  .btn-danger {
+    @apply bg-red-600 bg-opacity-20 hover:bg-red-600 hover:bg-opacity-30 text-red-400 px-4 py-2 rounded-lg font-medium border border-red-800 border-opacity-50 transition-all duration-200;
+  }
+  .input {
+    @apply bg-gray-800 bg-opacity-50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 focus:border-indigo-500 transition-all;
+  }
+  .select {
+    @apply bg-gray-800 bg-opacity-50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 appearance-none cursor-pointer;
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-green {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500 bg-opacity-20 text-emerald-400 border border-emerald-800 border-opacity-50;
+  }
+  .badge-red {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-500 bg-opacity-20 text-red-400 border border-red-800 border-opacity-50;
+  }
+  .badge-yellow {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500 bg-opacity-20 text-yellow-400 border border-yellow-800 border-opacity-50;
+  }
+  .badge-blue {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500 bg-opacity-20 text-blue-400 border border-blue-800 border-opacity-50;
+  }
+}

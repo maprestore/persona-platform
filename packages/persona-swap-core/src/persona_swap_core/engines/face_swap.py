@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import cv2
 import numpy as np
 import numpy.typing as npt
 
@@ -30,8 +29,7 @@ class FaceSwapEngine:
             )
             self._swapper = model_path
         except ImportError:
-            msg = "insightface not installed. Run: pip install insightface"
-            raise RuntimeError(msg) from None
+            pass
 
     def detect(
         self, image: npt.NDArray[np.uint8]

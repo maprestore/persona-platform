@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import cv2
 import numpy as np
 import numpy.typing as npt
 from shared.types import SwapEngine, VideoFrame, AudioFrame
