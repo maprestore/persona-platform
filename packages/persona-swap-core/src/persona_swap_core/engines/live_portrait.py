@@ -9,6 +9,7 @@ class LivePortraitEngine:
         self._model = None
         self._device = "cpu"
         self._loaded = False
+        self._device_torch = None
 
     def load(self, device: str = "cuda") -> None:
         self._device = device

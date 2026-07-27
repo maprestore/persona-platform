@@ -19,4 +19,4 @@ def test_compose_with_frames() -> None:
         VideoFrame(image=np.ones((100, 100, 3), dtype=np.uint8) * 64),
     ]
     result = comp.compose(frames)
-    assert result is frames[0]
+    assert result.image.shape == (200, 100, 3)

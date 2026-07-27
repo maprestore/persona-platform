@@ -14,6 +14,12 @@ class VoiceClonerEngine:
     def load(self, device: str = "cuda") -> None:
         self._device = device
         self._loaded = True
+        self._whisper_model = None
+        try:
+            import whisper
+            self._whisper_model = whisper.load_model("base", device=self._device)
+        except ImportError:
+            pass
 
     def add_voice_sample(
         self, name: str, audio: npt.NDArray[np.float32], sample_rate: int = 16000
@@ -96,7 +102,16 @@ class VoiceClonerEngine:
         sample_rate: int,
         mfcc_diff: npt.NDArray[np.float32],
     ) -> npt.NDArray[np.float32]:
-        return audio
+        spectrum = np.fft.rfft(audio)
+        freqs = np.fft.rfftfreq(len(audio), 1.0 / sample_rate)
+        n_mfcc = len(mfcc_diff)
+        for i in range(min(n_mfcc, len(spectrum))):
+            freq_bin = int(freqs[i] / (sample_rate / 2) * (len(spectrum) - 1))
+            if freq_bin < len(spectrum):
+                scale = 2.0 ** (mfcc_diff[i] / 10.0)
+                spectrum[freq_bin] *= scale
+        modified = np.fft.irfft(spectrum, n=len(audio))
+        return modified.astype(np.float32)
 
     def _voice_convert_stretch(
         self,
@@ -179,15 +194,11 @@ class VoiceClonerEngine:
             return shifted
 
     def transcribe(self, audio: npt.NDArray[np.float32], sample_rate: int = 16000) -> str:
-        try:
-            import whisper
-
-            model = whisper.load_model("base", device=self._device)
-            audio_float = audio.astype(np.float32)
-            result = model.transcribe(audio_float, fp16=self._device == "cuda")
-            return result["text"]
-        except ImportError:
+        if self._whisper_model is None:
             return ""
+        audio_float = audio.astype(np.float32)
+        result = self._whisper_model.transcribe(audio_float, fp16=self._device == "cuda")
+        return result["text"]
 
     def unload(self) -> None:
         self._samples.clear()

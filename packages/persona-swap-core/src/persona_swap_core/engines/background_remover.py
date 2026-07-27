@@ -107,9 +107,13 @@ class BackgroundRemover:
             result = rembg_remove(pil_img)
 
             result_np = np.array(result)
-            if result_np.shape[2] == 4:
+            if result_np.ndim == 3 and result_np.shape[2] == 4:
                 mask = result_np[:, :, 3]
                 fg = result_np[:, :, :3]
+            elif result_np.ndim == 2:
+                import cv2
+                mask = result_np
+                fg = cv2.cvtColor(result_np, cv2.COLOR_GRAY2RGB)
             else:
                 mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
                 fg = image

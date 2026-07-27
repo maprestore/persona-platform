@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import os
-import struct
-import fcntl
 import threading
 import time
 import sys
 from pathlib import Path
+
+if sys.platform == "linux":
+    import struct
+    import fcntl
+else:
+    struct = None
+    fcntl = None
 
 import numpy as np
 import numpy.typing as npt
@@ -51,18 +56,25 @@ class VirtualCamera:
         for dev in CAMERA_DEVICES:
             if not os.path.exists(dev):
                 continue
+            fd = -1
             try:
                 fd = os.open(dev, os.O_RDWR | os.O_NONBLOCK)
                 cap = struct.pack("I32s32s32s2I", 0, b"", b"", b"", 0, 0)
                 result = fcntl.ioctl(fd, VIDIOC_QUERYCAP, cap)
                 caps = struct.unpack("I32s32s32s2I", result)
-                os.close(fd)
 
                 if caps[4] & V4L2_CAP_VIDEO_OUTPUT:
+                    os.close(fd)
                     self._cam = V4L2VirtualCamera(dev, self.width, self.height, self.fps)
                     return self._cam.start()
             except (OSError, PermissionError, IOError):
                 continue
+            finally:
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
         return False
 
     def _start_pyvirtualcam(self) -> bool:
@@ -86,6 +98,9 @@ class VirtualCamera:
             if self._backend == "V4L2":
                 return self._cam.send(frame)
             else:
+                if frame.shape[2] == 4:
+                    import cv2
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
                 if frame.shape[2] == 3:
                     self._cam.send(frame)
                 return True
@@ -124,6 +139,8 @@ class V4L2VirtualCamera:
         return os.path.exists(self.device)
 
     def _open_device(self) -> bool:
+        if sys.platform != "linux":
+            return False
         try:
             self._fd = os.open(self.device, os.O_RDWR | os.O_NONBLOCK)
             cap = struct.pack("I32s32s32s2I", 0, b"", b"", b"", 0, 0)
@@ -170,10 +187,15 @@ class V4L2VirtualCamera:
 
             if len(frame.shape) == 3 and frame.shape[2] == 3:
                 import cv2
-                # Convert RGB to YUV420 (I420) planar format
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGB2YUV_I420)
 
-            os.write(self._fd, frame.tobytes())
+            data = frame.tobytes()
+            written = 0
+            while written < len(data):
+                n = os.write(self._fd, data[written:])
+                if n == 0:
+                    raise OSError("Short write returned 0")
+                written += n
             return True
         except (OSError, IOError):
             return False
@@ -204,6 +226,11 @@ class VirtualCameraManager:
         for dev in CAMERA_DEVICES:
             if os.path.exists(dev):
                 info = {"device": dev, "name": f"Camera {dev}", "type": "unknown", "driver": ""}
+                if sys.platform != "linux":
+                    info["type"] = "inaccessible"
+                    cameras.append(info)
+                    continue
+                fd = -1
                 try:
                     fd = os.open(dev, os.O_RDWR | os.O_NONBLOCK)
                     cap = struct.pack("I32s32s32s2I", 0, b"", b"", b"", 0, 0)
@@ -211,7 +238,6 @@ class VirtualCameraManager:
                     caps = struct.unpack("I32s32s32s2I", result)
                     info["driver"] = caps[1].rstrip(b"\x00").decode("utf-8", errors="replace")
                     info["name"] = caps[2].rstrip(b"\x00").decode("utf-8", errors="replace")
-                    os.close(fd)
 
                     if "loopback" in info["driver"].lower():
                         info["type"] = "v4l2loopback"
@@ -223,6 +249,12 @@ class VirtualCameraManager:
                         info["type"] = "capture"
                 except (OSError, PermissionError):
                     info["type"] = "inaccessible"
+                finally:
+                    if fd >= 0:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
                 cameras.append(info)
 
         if sys.platform != "linux":

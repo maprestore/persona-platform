@@ -72,11 +72,11 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     if args.source:
         source_path = Path(args.source)
         if source_path.exists():
-            img = cv2.imread(str(source_path))
-            if img is not None:
+            img_bgr = cv2.imread(str(source_path))
+            if img_bgr is not None:
                 from sdk.server import _engine_state
                 engine = _engine_state.get_engine()
-                engine.set_source(img)
+                engine.set_source(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
                 print(f"[persona] Loaded source: {args.source}")
 
     print(f"[persona] API server: http://{args.host}:{args.port}")
@@ -100,9 +100,9 @@ def _cmd_run(args: argparse.Namespace) -> None:
     source_path = Path(args.source) if args.source else None
 
     if source_path and source_path.exists():
-        img = cv2.imread(str(source_path))
-        if img is not None:
-            engine.set_source(img)
+        img_bgr = cv2.imread(str(source_path))
+        if img_bgr is not None:
+            engine.set_source(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
             print(f"[persona] Loaded source: {source_path}")
 
     # Start virtual camera (try multiple backends)

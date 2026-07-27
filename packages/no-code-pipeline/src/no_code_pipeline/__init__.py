@@ -47,16 +47,18 @@ class PipelineEngine:
         visited: set[str] = set()
 
         def _process(node_id: str, data: object = None) -> object:
-            if node_id in visited:
-                return results.get(node_id, data)
             visited.add(node_id)
 
             node = node_map[node_id]
-            output = self._execute_node(node, data)
+            prev_output = results.get(node_id)
+            if prev_output is None:
+                output = self._execute_node(node, data)
+            else:
+                output = self._execute_node(node, data if data is not None else prev_output)
             results[node_id] = output
 
             for child_id in adjacency.get(node_id, []):
-                output = _process(child_id, output)
+                _process(child_id, output)
 
             return output
 
@@ -113,7 +115,7 @@ class PipelineEngine:
     def _run_background_remove(self, node: NodeConfig, data: object) -> object:
         if not isinstance(data, dict):
             return data
-        image = data.get("output") or data.get("target")
+        image = data.get("output") if data.get("output") is not None else data.get("target")
         if image is None:
             return data
         img = np.array(image)
@@ -128,7 +130,7 @@ class PipelineEngine:
     def _run_scene_relight(self, node: NodeConfig, data: object) -> object:
         if not isinstance(data, dict):
             return data
-        image = data.get("output") or data.get("target")
+        image = data.get("output") if data.get("output") is not None else data.get("target")
         if image is None:
             return data
         img = np.array(image, dtype=np.float32)
@@ -139,7 +141,7 @@ class PipelineEngine:
     def _run_animate(self, node: NodeConfig, data: object) -> object:
         if not isinstance(data, dict):
             return data
-        image = data.get("output") or data.get("target")
+        image = data.get("output") if data.get("output") is not None else data.get("target")
         if image is None:
             return data
         return {**data, "animated": True, "output": image}

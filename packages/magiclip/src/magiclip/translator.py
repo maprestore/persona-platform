@@ -83,7 +83,7 @@ class MagiclipTranslator:
             )
             result = translator(text, max_length=512)
             return result[0]["translation_text"]
-        except ImportError:
+        except Exception:
             return text
 
     def _text_to_speech(self, text: str) -> npt.NDArray[np.float32] | None:

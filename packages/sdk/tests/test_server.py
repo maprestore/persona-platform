@@ -6,10 +6,11 @@ from sdk.server import create_app
 
 
 @pytest.fixture
-def client():
+async def client():
     app = create_app()
     transport = httpx.ASGITransport(app=app)
-    return httpx.AsyncClient(transport=transport, base_url="http://testserver")
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        yield client
 
 
 @pytest.mark.anyio

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import os
-import struct
-import fcntl
 import uuid
 import threading
+import sys
 from pathlib import Path
+
+if sys.platform == "linux":
+    import struct
+    import fcntl
+else:
+    struct = None
+    fcntl = None
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException, Form
@@ -104,6 +110,7 @@ class EngineState:
         self._virtual_cam = None
         self._virtual_cam_thread: threading.Thread | None = None
         self._cam_active = False
+        self._lock = threading.Lock()
 
     def get_engine(self):
         if not self._loaded:
@@ -129,14 +136,23 @@ class EngineState:
             self._translator = None
         self.stop_virtual_cam()
 
+    def send_virtual_cam(self, frame: npt.NDArray[np.uint8]) -> None:
+        with self._lock:
+            if self._cam_active and self._virtual_cam:
+                try:
+                    self._virtual_cam.send(frame)
+                except Exception:
+                    pass
+
     def stop_virtual_cam(self) -> None:
-        self._cam_active = False
-        if self._virtual_cam:
-            try:
-                self._virtual_cam.stop()
-            except Exception:
-                pass
-            self._virtual_cam = None
+        with self._lock:
+            self._cam_active = False
+            if self._virtual_cam:
+                try:
+                    self._virtual_cam.stop()
+                except Exception:
+                    pass
+                self._virtual_cam = None
 
 
 _engine_state = EngineState()
@@ -148,6 +164,11 @@ def _detect_cameras() -> list[dict]:
         if not os.path.exists(dev):
             continue
         info = {"device": dev, "name": f"Camera {dev}", "type": "unknown", "driver": ""}
+        if sys.platform != "linux":
+            info["type"] = "inaccessible"
+            cameras.append(info)
+            continue
+        fd = -1
         try:
             fd = os.open(dev, os.O_RDWR | os.O_NONBLOCK)
             cap = struct.pack("I32s32s32s2I", 0, b"", b"", b"", 0, 0)
@@ -168,10 +189,14 @@ def _detect_cameras() -> list[dict]:
                 info["type"] = "virtual_output"
             else:
                 info["type"] = "capture"
-
-            os.close(fd)
         except (OSError, PermissionError):
             info["type"] = "inaccessible"
+        finally:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
         cameras.append(info)
 
     if cameras:
@@ -581,11 +606,12 @@ def create_app() -> FastAPI:
     async def start_virtual_cam(req: VirtualCamRequest):
         try:
             from persona_swap_core.virtual_cam import VirtualCamera
-            cam = VirtualCamera(name=req.device, width=req.width, height=req.height, fps=req.fps)
+            cam = VirtualCamera(name="Persona Camera", width=req.width, height=req.height, fps=req.fps)
             ok = cam.start()
             if ok:
-                _engine_state._virtual_cam = cam
-                _engine_state._cam_active = True
+                with _engine_state._lock:
+                    _engine_state._virtual_cam = cam
+                    _engine_state._cam_active = True
                 return {"status": "ok", "device": req.device, "resolution": f"{req.width}x{req.height}", "fps": req.fps}
             return {"status": "error", "message": "Failed to start virtual camera"}
         except Exception as e:
@@ -598,9 +624,10 @@ def create_app() -> FastAPI:
 
     @app.get("/virtual-cam/status")
     async def virtual_cam_status():
-        active = _engine_state._cam_active
-        vcam = _engine_state._virtual_cam
-        device = vcam.name if vcam else None
+        with _engine_state._lock:
+            active = _engine_state._cam_active
+            vcam = _engine_state._virtual_cam
+            device = vcam.name if vcam else None
         return {"active": active, "device": device}
 
     @app.post("/swap", response_model=SwapResponse)
@@ -615,13 +642,16 @@ def create_app() -> FastAPI:
 
         try:
             import cv2
-            source_img = cv2.imread(str(source_path))
-            target_img = cv2.imread(str(target_path))
+            source_bgr = cv2.imread(str(source_path))
+            target_bgr = cv2.imread(str(target_path))
 
-            if source_img is None:
+            if source_bgr is None:
                 raise HTTPException(status_code=400, detail="Cannot read source image")
-            if target_img is None:
+            if target_bgr is None:
                 raise HTTPException(status_code=400, detail="Cannot read target image")
+
+            source_img = cv2.cvtColor(source_bgr, cv2.COLOR_BGR2RGB)
+            target_img = cv2.cvtColor(target_bgr, cv2.COLOR_BGR2RGB)
 
             engine = _engine_state.get_engine()
 
@@ -640,13 +670,9 @@ def create_app() -> FastAPI:
                 ext = ".jpg"
             output_id = f"swap_{uuid.uuid4().hex[:12]}{ext}"
             output_path = OUTPUT_DIR / output_id
-            cv2.imwrite(str(output_path), result_frame.image)
+            cv2.imwrite(str(output_path), cv2.cvtColor(result_frame.image, cv2.COLOR_RGB2BGR))
 
-            if _engine_state._cam_active and _engine_state._virtual_cam:
-                try:
-                    _engine_state._virtual_cam.send(result_frame.image)
-                except Exception:
-                    pass
+            _engine_state.send_virtual_cam(result_frame.image)
 
             return SwapResponse(
                 status="success",
@@ -670,7 +696,8 @@ def create_app() -> FastAPI:
 
         try:
             import cv2
-            source_img = cv2.imread(str(source_path))
+            source_bgr = cv2.imread(str(source_path))
+            source_img = cv2.cvtColor(source_bgr, cv2.COLOR_BGR2RGB)
             cap = cv2.VideoCapture(str(target_path))
 
             fps = cap.get(cv2.CAP_PROP_FPS)
@@ -690,12 +717,14 @@ def create_app() -> FastAPI:
 
             frames_processed = 0
             while True:
-                ret, frame = cap.read()
+                ret, frame_bgr = cap.read()
                 if not ret:
                     break
-                target_frame = VideoFrame(image=frame)
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                target_frame = VideoFrame(image=frame_rgb)
                 result_frame = engine.swap_with_options(source_frame, target_frame)
-                out.write(result_frame.image)
+                result_bgr = cv2.cvtColor(result_frame.image, cv2.COLOR_RGB2BGR)
+                out.write(result_bgr)
                 frames_processed += 1
 
             cap.release()
@@ -720,9 +749,10 @@ def create_app() -> FastAPI:
 
         try:
             import cv2
-            source_img = cv2.imread(str(source_path))
-            if source_img is None:
+            source_bgr = cv2.imread(str(source_path))
+            if source_bgr is None:
                 raise HTTPException(status_code=400, detail="Cannot read source image")
+            source_img = cv2.cvtColor(source_bgr, cv2.COLOR_BGR2RGB)
 
             engine = _engine_state.get_engine()
             frames = engine.animate_portrait(source_img, req.expression, req.intensity)
@@ -757,9 +787,10 @@ def create_app() -> FastAPI:
 
         try:
             import cv2
-            img = cv2.imread(str(file_path))
-            if img is None:
+            img_bgr = cv2.imread(str(file_path))
+            if img_bgr is None:
                 raise HTTPException(status_code=400, detail="Cannot read image")
+            img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
             engine = _engine_state.get_engine()
 
@@ -767,7 +798,9 @@ def create_app() -> FastAPI:
             if req.bg_file_id:
                 bg_path = UPLOAD_DIR / req.bg_file_id
                 if bg_path.exists():
-                    bg_img = cv2.imread(str(bg_path))
+                    bg_bgr = cv2.imread(str(bg_path))
+                    if bg_bgr is not None:
+                        bg_img = cv2.cvtColor(bg_bgr, cv2.COLOR_BGR2RGB)
 
             bg_color = _parse_color(req.bg_color)
 
@@ -780,7 +813,7 @@ def create_app() -> FastAPI:
 
             output_id = f"bg_{uuid.uuid4().hex[:12]}.png"
             output_path = OUTPUT_DIR / output_id
-            cv2.imwrite(str(output_path), result)
+            cv2.imwrite(str(output_path), cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
 
             return {
                 "status": "success",
@@ -800,18 +833,20 @@ def create_app() -> FastAPI:
 
         try:
             import cv2
-            img = cv2.imread(str(file_path))
-            if img is None:
+            img_bgr = cv2.imread(str(file_path))
+            if img_bgr is None:
                 raise HTTPException(status_code=400, detail="Cannot read image")
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
             engine = _engine_state.get_engine()
             from shared.types import VideoFrame
-            frame = VideoFrame(image=img)
+            frame = VideoFrame(image=img_rgb)
             result = engine.apply_filter(frame, req.filter_name, req.intensity)
 
             output_id = f"filter_{uuid.uuid4().hex[:12]}.png"
             output_path = OUTPUT_DIR / output_id
-            cv2.imwrite(str(output_path), result.image)
+            result_bgr = cv2.cvtColor(result.image, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(str(output_path), result_bgr)
 
             return {
                 "status": "success",
@@ -965,11 +1000,12 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="File not found")
         try:
             import cv2
-            img = cv2.imread(str(file_path))
-            if img is None:
+            img_bgr = cv2.imread(str(file_path))
+            if img_bgr is None:
                 raise HTTPException(status_code=400, detail="Cannot read image")
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
             engine = _engine_state.get_engine()
-            ok = engine.set_source(img)
+            ok = engine.set_source(img_rgb)
             return {"status": "ok", "faces_detected": ok}
         except ImportError:
             raise HTTPException(status_code=500, detail="opencv-python not installed")
@@ -995,6 +1031,10 @@ def create_app() -> FastAPI:
         await ws.accept()
         engine = _engine_state.get_engine()
         try:
+            if engine._source_faces is None:
+                await ws.send_json({"error": "No source face set. Call /set-source first."})
+                await ws.close()
+                return
             while True:
                 data = await ws.receive_bytes()
                 arr = np.frombuffer(data, dtype=np.uint8)
@@ -1003,16 +1043,13 @@ def create_app() -> FastAPI:
                     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if img is not None:
                         from shared.types import VideoFrame
-                        target_frame = VideoFrame(image=img)
+                        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        target_frame = VideoFrame(image=img_rgb)
                         # Swap stored source face with incoming target frame
-                        source_frame = VideoFrame(image=np.zeros_like(img))  # placeholder, engine uses _source_faces
+                        source_frame = VideoFrame(image=np.zeros_like(img_rgb))  # placeholder, engine uses _source_faces
                         result = engine.swap(source_frame, target_frame)
 
-                        if _engine_state._cam_active and _engine_state._virtual_cam:
-                            try:
-                                _engine_state._virtual_cam.send(result.image)
-                            except Exception:
-                                pass
+                        _engine_state.send_virtual_cam(result.image)
 
                         _, buf = cv2.imencode(".jpg", result.image)
                         await ws.send_bytes(buf.tobytes())

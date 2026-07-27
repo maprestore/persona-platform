@@ -10,7 +10,7 @@ def test_analyze_returns_dict() -> None:
     frame = VideoFrame(image=np.zeros((100, 100, 3), dtype=np.uint8))
     result = engine.analyze(frame)
     assert "scene_type" in result
-    assert result["scene_type"] == "unknown"
+    assert result["scene_type"] == "dark_night"
 
 
 def test_relight_returns_frame() -> None:

@@ -43,7 +43,12 @@ class SceneComposer:
                     new_h = int(img.shape[0] * scale)
                     img = cv2.resize(img, (max_w, new_h))
                 except ImportError:
-                    pass
+                    h, w = img.shape[:2]
+                    scale = max_w / w
+                    new_h = int(h * scale)
+                    x_indices = np.linspace(0, w - 1, max_w).astype(int)
+                    y_indices = np.linspace(0, h - 1, new_h).astype(int)
+                    img = img[np.ix_(y_indices, x_indices)]
             resized.append(img)
         result = np.vstack(resized)
         return VideoFrame(image=result)
@@ -78,7 +83,12 @@ class SceneComposer:
                     new_w = int(img.shape[1] * scale)
                     img = cv2.resize(img, (new_w, max_h))
                 except ImportError:
-                    pass
+                    h, w = img.shape[:2]
+                    scale = max_h / h
+                    new_w = int(w * scale)
+                    x_indices = np.linspace(0, w - 1, new_w).astype(int)
+                    y_indices = np.linspace(0, h - 1, max_h).astype(int)
+                    img = img[np.ix_(y_indices, x_indices)]
             resized.append(img)
         result = np.hstack(resized)
         return VideoFrame(image=result)
@@ -95,10 +105,12 @@ class SceneComposer:
         fh, fw = fg.shape[:2]
         bh, bw = bg.shape[:2]
 
-        x = max(0, min(x, bw - fw))
-        y = max(0, min(y, bh - fh))
+        x = max(0, min(x, bw - 1))
+        y = max(0, min(y, bh - 1))
+        fw_use = min(fw, bw - x)
+        fh_use = min(fh, bh - y)
 
-        bg[y : y + fh, x : x + fw] = fg
+        bg[y : y + fh_use, x : x + fw_use] = fg[:fh_use, :fw_use]
         return VideoFrame(image=bg)
 
     def unload(self) -> None:

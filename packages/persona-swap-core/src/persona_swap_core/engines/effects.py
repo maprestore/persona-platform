@@ -59,7 +59,8 @@ class EffectsPipeline:
             gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
             return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
         except ImportError:
-            return np.dot(img[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
+            gray = np.dot(img[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
+            return np.stack([gray] * 3, axis=-1)
 
     def _sepia(self, img: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
         result = img.astype(np.float32)
@@ -163,7 +164,15 @@ class EffectsPipeline:
             return cv2.GaussianBlur(img, (15, 15), 0)
         except ImportError:
             kernel = np.ones((5, 5), dtype=np.float32) / 25
-            return convolve2d(img, kernel)
+            try:
+                return convolve2d(img, kernel)
+            except Exception:
+                if len(img.shape) == 3:
+                    result = np.zeros_like(img, dtype=np.float32)
+                    for c in range(img.shape[2]):
+                        result[:, :, c] = _box_blur_numpy(img[:, :, c].astype(np.float32), 5)
+                    return np.clip(result, 0, 255).astype(np.uint8)
+                return np.clip(_box_blur_numpy(img.astype(np.float32), 5), 0, 255).astype(np.uint8)
 
     def _sharpen(self, img: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
         try:
@@ -190,9 +199,10 @@ class EffectsPipeline:
             kernel = np.array([[-2, -1, 0],
                                [-1, 1, 1],
                                [0, 1, 2]])
-            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-            embossed = cv2.filter2D(gray, -1, kernel)
-            return cv2.cvtColor(embossed + 128, cv2.COLOR_GRAY2RGB)
+            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.int16)
+            embossed = cv2.filter2D(gray, cv2.CV_16S, kernel)
+            embossed = np.clip(embossed + 128, 0, 255).astype(np.uint8)
+            return cv2.cvtColor(embossed, cv2.COLOR_GRAY2RGB)
         except ImportError:
             return img
 
@@ -200,10 +210,12 @@ class EffectsPipeline:
         try:
             import cv2
             h, w = img.shape[:2]
-            pixel_size = 10
-            temp = cv2.resize(img, (w // pixel_size, h // pixel_size), interpolation=cv2.INTER_LINEAR)
+            pixel_size = min(10, max(1, w // 2, h // 2))
+            small_w = max(1, w // pixel_size)
+            small_h = max(1, h // pixel_size)
+            temp = cv2.resize(img, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
             return cv2.resize(temp, (w, h), interpolation=cv2.INTER_NEAREST)
-        except ImportError:
+        except Exception:
             return img
 
     def _glitch(self, img: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
@@ -212,7 +224,7 @@ class EffectsPipeline:
         try:
             for channel in range(3):
                 offset = np.random.randint(-10, 10)
-                shift = np.random.randint(0, h // 4)
+                shift = np.random.randint(0, max(1, h // 4))
                 if offset != 0:
                     result[shift:shift + h // 8, :, channel] = np.roll(
                         result[shift:shift + h // 8, :, channel], offset, axis=1
@@ -248,3 +260,9 @@ def convolve2d(img: npt.NDArray[np.uint8], kernel: npt.NDArray[np.float32]) -> n
             result[:, :, c] = convolve(img[:, :, c], kernel)
         return result
     return convolve(img, kernel).astype(np.uint8)
+
+
+def _box_blur_numpy(img: npt.NDArray[np.float32], kernel_size: int) -> npt.NDArray[np.float32]:
+    kernel = np.ones(kernel_size, dtype=np.float32) / kernel_size
+    temp = np.apply_along_axis(lambda x: np.convolve(x, kernel, mode="same"), axis=1, arr=img)
+    return np.apply_along_axis(lambda x: np.convolve(x, kernel, mode="same"), axis=0, arr=temp)

@@ -64,10 +64,10 @@ def add_watermark_frame(
 ) -> VideoFrame:
     if config is None:
         frame.image = add_watermark(frame.image)
-    elif config.text:
+    else:
         frame.image = add_watermark(
             frame.image,
-            text=config.text,
+            text=config.text if config.text else WATERMARK_TEXT,
             opacity=config.opacity,
             position=config.position,
             font_size=config.font_size,
