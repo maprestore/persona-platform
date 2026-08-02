@@ -1,0 +1,21 @@
+{
+  "release": "persona-platform-full-refactor",
+  "source_files": 88,
+  "refactor_scope": [
+    "explicit_feature_health",
+    "media_write_validation",
+    "websocket_cleanup",
+    "pipeline_validation",
+    "frontend_error_surfaces",
+    "launcher_and_ci_reliability"
+  ],
+  "static_checks": [
+    "python_ast",
+    "compileall",
+    "bash_n",
+    "frontend_state_contracts",
+    "api_contracts",
+    "pipeline_contracts"
+  ],
+  "runtime_tests": "not run in sandbox: pytest/FastAPI/httpx unavailable"
+}

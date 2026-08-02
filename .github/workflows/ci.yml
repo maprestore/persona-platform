@@ -1,3 +1,4 @@
+
 name: CI
 
 on:
@@ -18,6 +19,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+      - run: python -m pip install --upgrade pip
       - run: pip install ruff
       - run: ruff check packages/ example/
 
@@ -29,7 +31,7 @@ jobs:
         with:
           python-version: "3.10"
       - run: pip install pyright
-      - run: pyright packages/ example/ || true
+      - run: pyright packages/ example/
 
   test:
     runs-on: ubuntu-latest
@@ -38,5 +40,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - run: pip install .[all]
-      - run: make test
+      - run: pip install -e packages/shared -e packages/persona-swap-core -e packages/magiclip -e packages/sdk -e packages/no-code-pipeline -e packages
+      - run: python -m pytest -q

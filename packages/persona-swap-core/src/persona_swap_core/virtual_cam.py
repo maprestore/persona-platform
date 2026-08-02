@@ -1,10 +1,14 @@
+
 from __future__ import annotations
 
 import os
-import threading
-import time
 import sys
+import logging
 from pathlib import Path
+
+import numpy as np
+import numpy.typing as npt
+from shared.utils import V4L2_CAP_VIDEO_OUTPUT, VIDIOC_QUERYCAP, CAMERA_DEVICES
 
 if sys.platform == "linux":
     import struct
@@ -13,14 +17,7 @@ else:
     struct = None
     fcntl = None
 
-import numpy as np
-import numpy.typing as npt
-
-
-V4L2_CAP_VIDEO_OUTPUT = 0x00000001
-VIDIOC_QUERYCAP = 0x80685600
-
-CAMERA_DEVICES = [f"/dev/video{i}" for i in range(16)]
+logger = logging.getLogger(__name__)
 
 
 class VirtualCamera:
@@ -32,8 +29,10 @@ class VirtualCamera:
         self._running = False
         self._cam = None
         self._backend = None
+        self._last_error: str | None = None
 
     def start(self) -> bool:
+        self._last_error = None
         backends = []
 
         if sys.platform == "linux":
@@ -47,7 +46,9 @@ class VirtualCamera:
                     self._backend = name
                     self._running = True
                     return True
-            except Exception:
+            except Exception as exc:
+                self._last_error = f"{name}: {exc}"
+                logger.warning("virtual camera backend failed: %s", self._last_error)
                 continue
 
         return False
@@ -65,6 +66,7 @@ class VirtualCamera:
 
                 if caps[4] & V4L2_CAP_VIDEO_OUTPUT:
                     os.close(fd)
+                    fd = -1
                     self._cam = V4L2VirtualCamera(dev, self.width, self.height, self.fps)
                     return self._cam.start()
             except (OSError, PermissionError, IOError):
@@ -78,33 +80,38 @@ class VirtualCamera:
         return False
 
     def _start_pyvirtualcam(self) -> bool:
-        import pyvirtualcam
-        self._cam = pyvirtualcam.Camera(
-            name=self.name,
-            width=self.width,
-            height=self.height,
-            fps=self.fps,
-        )
-        return True
+        try:
+            import pyvirtualcam
+            self._cam = pyvirtualcam.Camera(
+                name=self.name,
+                width=self.width,
+                height=self.height,
+                fps=self.fps,
+            )
+            return True
+        except Exception as exc:
+            self._last_error = f"pyvirtualcam: {exc}"
+            return False
 
     def send(self, frame: npt.NDArray[np.uint8]) -> bool:
         if not self._running or self._cam is None:
             return False
         try:
+            import cv2
             if frame.shape[:2] != (self.height, self.width):
-                import cv2
                 frame = cv2.resize(frame, (self.width, self.height))
 
             if self._backend == "V4L2":
                 return self._cam.send(frame)
-            else:
-                if frame.shape[2] == 4:
-                    import cv2
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
-                if frame.shape[2] == 3:
-                    self._cam.send(frame)
-                return True
-        except Exception:
+
+            if frame.shape[2] == 4:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+            if frame.shape[2] == 3:
+                self._cam.send(frame)
+            return True
+        except Exception as exc:
+            self._last_error = str(exc) or exc.__class__.__name__
+            logger.warning("virtual camera send failed: %s", self._last_error)
             return False
 
     def stop(self) -> None:
@@ -115,9 +122,13 @@ class VirtualCamera:
                     self._cam.stop()
                 else:
                     self._cam.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("virtual camera stop error: %s", exc)
             self._cam = None
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
 
     def is_running(self) -> bool:
         return self._running

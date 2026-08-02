@@ -1,3 +1,4 @@
+
 [project]
 name = "persona-swap-core"
 version = "0.1.0"
@@ -9,22 +10,23 @@ dependencies = [
     "opencv-python>=4.8",
     "torch>=2.0",
     "pillow>=10.0",
-    "shared",
+    "shared @ file://../shared",
     "librosa>=0.10",
     "scipy>=1.10",
 ]
 
 [project.optional-dependencies]
 all = [
-    "insightface>=0.7",
-    "onnxruntime-gpu; platform_system == 'Linux'",
-    "onnxruntime; platform_system != 'Linux'",
+    "insightface>=0.7; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "onnxruntime-gpu; platform_system == 'Linux' and (platform_machine == 'x86_64' or platform_machine == 'AMD64')",
+    "onnxruntime; platform_system == 'Windows' or platform_system == 'Darwin'",
     "gfpgan",
     "pydub",
     "whisper",
     "rembg",
     "soundfile",
     "torchcrepe",
+    "mediapipe",
 ]
 
 [build-system]

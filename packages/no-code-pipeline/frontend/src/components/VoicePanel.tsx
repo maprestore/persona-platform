@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { api } from '../api';
 
@@ -13,22 +14,35 @@ export default function VoicePanel() {
   const [cloneName, setCloneName] = useState('');
   const [cloneFile, setCloneFile] = useState<File | null>(null);
   const [cloneFileId, setCloneFileId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLInputElement>(null);
   const cloneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api.voiceCloneList().then((data) => setVoices(data.voices || [])).catch(() => {});
+    api.voiceCloneList().then((data) => setVoices(data.voices || [])).catch((e) => setError(e instanceof Error ? e.message : 'Could not load data'));
   }, []);
 
   const handleAudioUpload = async (f: File) => {
     setAudioFile(f);
-    const data = await api.upload(f);
+    let data;
+    try {
+      data = await api.upload(f);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed');
+      return;
+    }
     setAudioId(data.file_id);
   };
 
   const handleCloneUpload = async (f: File) => {
     setCloneFile(f);
-    const data = await api.upload(f);
+    let data;
+    try {
+      data = await api.upload(f);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed');
+      return;
+    }
     setCloneFileId(data.file_id);
   };
 
@@ -53,7 +67,7 @@ export default function VoicePanel() {
         setResultUrl(api.getOutputUrl(data.output_id));
       }
     } catch (e) {
-      console.error('Voice conversion failed:', e);
+      setError(e instanceof Error ? e.message : 'Voice operation failed');
     } finally {
       setProcessing(false);
     }
@@ -61,6 +75,7 @@ export default function VoicePanel() {
 
   return (
     <div className="max-w-2xl mx-auto flex flex-col gap-4">
+      {error && <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Voice Changer & Cloning</h2>
       <p className="text-xs text-gray-500">Real-time voice conversion and cloning</p>
 

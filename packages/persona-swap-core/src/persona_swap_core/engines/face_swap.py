@@ -1,8 +1,15 @@
+
 from __future__ import annotations
 
+import logging
+import os
+from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 from shared.types import TuningParams
+from shared.utils import cv2_add_weighted
+
+logger = logging.getLogger(__name__)
 
 
 class FaceSwapEngine:
@@ -12,6 +19,7 @@ class FaceSwapEngine:
         self._enhancer = None
         self._device = "cpu"
         self._use_4k = False
+        self._load_error: str | None = None
 
     @property
     def device(self) -> str:
@@ -20,23 +28,43 @@ class FaceSwapEngine:
     def load(self, device: str = "cuda", use_4k: bool = False) -> None:
         self._device = device
         self._use_4k = use_4k
+        self._load_error = None
+        self._detector = None
+        self._swapper = None
         try:
             import insightface
+            import os
             from insightface.app import FaceAnalysis
-            self._detector = FaceAnalysis(
-                name="buffalo_l",
-                providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            providers = (
+                ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                if device == "cuda"
+                else ["CPUExecutionProvider"]
             )
+            root = os.path.join(os.path.expanduser("~"), ".insightface", "models")
+            self._detector = FaceAnalysis(name="buffalo_1", root=root, download=False, providers=providers)
             self._detector.prepare(ctx_id=0 if device == "cuda" else -1)
 
-            model_path = insightface.model_zoo.get_model(
-                "inswapper_128.onnx",
-                download=True,
-                providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
-            )
-            self._swapper = model_path
-        except ImportError:
-            pass
+            swapper_path = os.path.join(root, "inswapper_128.onnx")
+            if os.path.isfile(swapper_path):
+                self._swapper = insightface.model_zoo.get_model(
+                    swapper_path, download=False, providers=providers
+                )
+            else:
+                self._swapper = insightface.model_zoo.get_model(
+                    "inswapper_128.onnx", download=True, providers=providers
+                )
+        except (ImportError, RuntimeError, OSError) as exc:
+            self._detector = None
+            self._swapper = None
+            self._load_error = str(exc) or exc.__class__.__name__
+
+    @property
+    def available(self) -> bool:
+        return self._detector is not None and self._swapper is not None
+
+    @property
+    def load_error(self) -> str | None:
+        return self._load_error
 
     def detect(
         self, image: npt.NDArray[np.uint8]
@@ -46,6 +74,8 @@ class FaceSwapEngine:
         faces = self._detector.get(image)
         results = []
         for face in faces:
+            if face.landmark is None or face.bbox is None or face.embedding is None:
+                continue
             results.append({
                 "bbox": face.bbox.tolist(),
                 "landmarks": face.landmark.tolist(),
@@ -62,18 +92,21 @@ class FaceSwapEngine:
         tuning: TuningParams | None = None,
     ) -> npt.NDArray[np.uint8]:
         if self._swapper is None:
+            logger.debug("swapper is None, returning target")
             return target_img
 
         if source_faces is None:
             source_faces = self.detect(source_img)
 
         if not source_faces:
+            logger.debug("no source faces, returning target")
             return target_img
 
         if self._use_4k:
             target_img = self._upscale_image(target_img)
 
         target_faces = self.detect(target_img)
+        logger.debug("source_faces=%d, target_faces=%d", len(source_faces), len(target_faces))
         result = target_img.copy()
 
         if tuning is None:
@@ -181,6 +214,8 @@ class FaceSwapEngine:
             y1 = max(0, y1)
             x2 = min(w, x2)
             y2 = min(h, y2)
+            if x2 <= x1 or y2 <= y1:
+                return image
 
             kernel_size = max(3, int(smoothness * 20))
             if kernel_size % 2 == 0:
@@ -190,7 +225,7 @@ class FaceSwapEngine:
             blurred = cv2.GaussianBlur(face_region, (kernel_size, kernel_size), 0)
             image[y1:y2, x1:x2] = blurred
             return image
-        except (ImportError, Exception):
+        except (ImportError, ValueError, KeyError):
             return image
 
     def _feather_edges(
@@ -205,6 +240,10 @@ class FaceSwapEngine:
             bbox = face["bbox"]
             x1, y1, x2, y2 = [int(v) for v in bbox]
             h, w = image.shape[:2]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w - 1, x2), min(h - 1, y2)
+            if x2 <= x1 or y2 <= y1 or original.shape != image.shape:
+                return image
 
             mask = np.zeros((h, w), dtype=np.float32)
             cv2.rectangle(mask, (x1, y1), (x2, y2), 1.0, -1)
@@ -217,7 +256,7 @@ class FaceSwapEngine:
             mask_3ch = np.stack([mask] * 3, axis=-1)
             result = (image * mask_3ch + original * (1 - mask_3ch)).astype(np.uint8)
             return result
-        except (ImportError, Exception):
+        except (ImportError, ValueError, KeyError):
             return image
 
     def _upscale_image(self, image: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
@@ -247,8 +286,12 @@ class FaceSwapEngine:
         try:
             from gfpgan import GFPGANer
             if self._enhancer is None:
+                model_path = os.environ.get(
+                    "GFPGAN_MODEL_PATH",
+                    str(Path(__file__).resolve().parent.parent.parent.parent / "experiments" / "pretrained_models" / "GFPGANv1.4.pth"),
+                )
                 self._enhancer = GFPGANer(
-                    model_path="experiments/pretrained_models/GFPGANv1.4.pth",
+                    model_path=model_path,
                     upscale=1,
                     arch="clean",
                     channel_multiplier=2,
@@ -262,15 +305,4 @@ class FaceSwapEngine:
         self._detector = None
         self._swapper = None
         self._enhancer = None
-
-
-def cv2_add_weighted(
-    img1: npt.NDArray[np.uint8],
-    img2: npt.NDArray[np.uint8],
-    alpha: float,
-) -> npt.NDArray[np.uint8]:
-    try:
-        import cv2
-        return cv2.addWeighted(img1, 1 - alpha, img2, alpha, 0)
-    except ImportError:
-        return (img1.astype(np.float32) * (1 - alpha) + img2.astype(np.float32) * alpha).astype(np.uint8)
+        self._load_error = None

@@ -1,3 +1,4 @@
+
 """Real-time webcam face-swap demo with virtual camera output."""
 
 import cv2

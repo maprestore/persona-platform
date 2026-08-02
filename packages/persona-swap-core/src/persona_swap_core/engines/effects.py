@@ -1,7 +1,12 @@
+
 from __future__ import annotations
 
+import logging
 import numpy as np
 import numpy.typing as npt
+from shared.utils import cv2_add_weighted
+
+logger = logging.getLogger(__name__)
 
 
 class EffectsPipeline:
@@ -215,7 +220,7 @@ class EffectsPipeline:
             small_h = max(1, h // pixel_size)
             temp = cv2.resize(img, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
             return cv2.resize(temp, (w, h), interpolation=cv2.INTER_NEAREST)
-        except Exception:
+        except (ImportError, ValueError):
             return img
 
     def _glitch(self, img: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
@@ -235,18 +240,6 @@ class EffectsPipeline:
 
     def unload(self) -> None:
         self._loaded = False
-
-
-def cv2_add_weighted(
-    img1: npt.NDArray[np.uint8],
-    img2: npt.NDArray[np.uint8],
-    alpha: float,
-) -> npt.NDArray[np.uint8]:
-    try:
-        import cv2
-        return cv2.addWeighted(img1, 1 - alpha, img2, alpha, 0)
-    except ImportError:
-        return (img1 * (1 - alpha) + img2 * alpha).astype(np.uint8)
 
 
 def convolve2d(img: npt.NDArray[np.uint8], kernel: npt.NDArray[np.float32]) -> npt.NDArray[np.uint8]:

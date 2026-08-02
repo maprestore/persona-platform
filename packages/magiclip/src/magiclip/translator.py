@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import numpy as np
@@ -11,6 +12,7 @@ class MagiclipTranslator:
         self._whisper_model = None
         self._source_lang = "en"
         self._target_lang = "es"
+        self._load_error: str | None = None
 
     def load(self, device: str = "cuda") -> None:
         self._device = device
@@ -18,8 +20,16 @@ class MagiclipTranslator:
         try:
             import whisper
             self._whisper_model = whisper.load_model("base", device=device)
-        except ImportError:
-            pass
+        except ImportError as exc:
+            self._load_error = str(exc) or "Whisper is not installed"
+
+    @property
+    def available(self) -> bool:
+        return self._loaded and self._whisper_model is not None
+
+    @property
+    def load_error(self) -> str | None:
+        return self._load_error
 
     def set_languages(self, source: str, target: str) -> None:
         self._source_lang = source
@@ -30,8 +40,8 @@ class MagiclipTranslator:
         audio: npt.NDArray[np.float32],
         sample_rate: int = 16000,
     ) -> tuple[str, npt.NDArray[np.float32] | None]:
-        if not self._loaded or self._whisper_model is None:
-            return "", None
+        if not self.available:
+            raise RuntimeError(self._load_error or "translation model is unavailable")
 
         result = self._whisper_model.transcribe(
             audio.astype(np.float32),
@@ -83,8 +93,8 @@ class MagiclipTranslator:
             )
             result = translator(text, max_length=512)
             return result[0]["translation_text"]
-        except Exception:
-            return text
+        except Exception as exc:
+            raise RuntimeError(f"translation model failed: {exc}") from exc
 
     def _text_to_speech(self, text: str) -> npt.NDArray[np.float32] | None:
         if not text.strip():

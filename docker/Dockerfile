@@ -20,4 +20,4 @@ RUN pip uninstall -y torch torchvision && \
 
 EXPOSE 6967
 
-CMD ["persona", "serve"]
+CMD ["python3", "run_persona.py"]

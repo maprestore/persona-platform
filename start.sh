@@ -1,50 +1,20 @@
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
+#!/bin/bash
+DIR="/data/data/com.termux/files/home/persona-platform"
 
-HOST="${HOST:-127.0.0.1}"
-PORT="${PORT:-6967}"
-SOURCE=""
+# Kill existing
+pkill -f "uvicorn main:app" 2>/dev/null
+pkill -f "vite" 2>/dev/null
+sleep 1
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --source|--image|--video) SOURCE="$2"; shift 2 ;;
-    --port) PORT="$2"; shift 2 ;;
-    --host) HOST="$2"; shift 2 ;;
-    *) echo "Usage: ./start.sh [--source photo.jpg] [--port 6967]"; exit 0 ;;
-  esac
-done
+# Start backend
+cd "$DIR/saas/backend"
+nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 &>/data/data/com.termux/files/usr/tmp/backend.log &
 
-PYTHON=$(command -v python3 || command -v python)
+# Start frontend
+cd "$DIR/saas/frontend"
+nohup node ./node_modules/vite/bin/vite.js --host 0.0.0.0 --port 3000 &>/data/data/com.termux/files/usr/tmp/frontend.log &
 
-echo "Starting Persona Studio on http://$HOST:$PORT"
-echo "  Webcam page: http://$HOST:$PORT/cam"
-echo ""
-
-PYTHONPATH="packages/shared/src:packages/persona-swap-core/src:packages/sdk/src:packages/magiclip/src"
-export PYTHONPATH
-
-if [ -n "$SOURCE" ]; then
-  $PYTHON -c "
-import sys, os, cv2
-sys.path = os.environ['PYTHONPATH'].split(':') + sys.path
-from sdk.server import create_app, _engine_state
-import uvicorn
-
-app = create_app()
-engine = _engine_state.get_engine()
-img = cv2.imread('$SOURCE')
-if img is not None:
-    engine.set_source(img)
-    print('Source face loaded: $SOURCE')
-uvicorn.run(app, host='$HOST', port=$PORT)
-"
-else
-  $PYTHON -c "
-import sys, os
-sys.path = os.environ['PYTHONPATH'].split(':') + sys.path
-from sdk.server import create_app
-import uvicorn
-uvicorn.run(create_app(), host='$HOST', port=$PORT)
-"
-fi
+sleep 3
+echo "Backend:  http://localhost:8000"
+echo "Frontend: http://localhost:3000"
+echo "API Docs: http://localhost:8000/docs"

@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { api } from '../api';
 
@@ -12,6 +13,7 @@ export default function TuningPanel() {
     landmark_smoothing: true,
   });
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const update = (key: string, value: any) => {
     setParams((prev) => ({ ...prev, [key]: value }));
@@ -24,12 +26,13 @@ export default function TuningPanel() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
-      console.error('Failed to save tuning:', e);
+      setError(e instanceof Error ? e.message : 'Could not save tuning');
     }
   };
 
   return (
     <div className="max-w-xl mx-auto flex flex-col gap-4">
+      {error && <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Advanced Tuning</h2>
       <p className="text-xs text-gray-500">Fine-tune face swap quality and performance</p>
 

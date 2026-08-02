@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { api } from '../api';
 
@@ -11,12 +12,19 @@ export default function BackgroundPanel() {
   const [blurAmount, setBlurAmount] = useState(31);
   const [processing, setProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (f: File) => {
     setFile(f);
     setPreview(URL.createObjectURL(f));
-    const data = await api.upload(f);
+    let data;
+    try {
+      data = await api.upload(f);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed');
+      return;
+    }
     setFileId(data.file_id);
   };
 
@@ -36,7 +44,7 @@ export default function BackgroundPanel() {
         setResultUrl(api.getOutputUrl(data.output_id));
       }
     } catch (e) {
-      console.error('Background processing failed:', e);
+      setError(e instanceof Error ? e.message : 'Background processing failed');
     } finally {
       setProcessing(false);
     }
@@ -44,6 +52,7 @@ export default function BackgroundPanel() {
 
   return (
     <div className="max-w-2xl mx-auto flex flex-col gap-4">
+      {error && <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Background</h2>
       <p className="text-xs text-gray-500">Remove, replace, or blur backgrounds</p>
 

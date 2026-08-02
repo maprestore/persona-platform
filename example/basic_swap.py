@@ -1,3 +1,4 @@
+
 """Minimal face-swap example."""
 
 import cv2

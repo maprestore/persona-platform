@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
 
@@ -15,6 +16,7 @@ export default function VirtualCamPanel() {
   const [fps, setFps] = useState(30);
   const [active, setActive] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     detectCameras();
@@ -30,8 +32,9 @@ export default function VirtualCamPanel() {
         );
         if (virtual) setSelectedDevice(virtual.device);
       }
-    } catch {
-      setCameras([{ device: '/dev/video0', name: 'Default Camera', type: 'unknown' }]);
+    } catch (e) {
+      setCameras([]);
+      setError(e instanceof Error ? e.message : 'Could not detect cameras');
     }
   };
 
@@ -41,8 +44,9 @@ export default function VirtualCamPanel() {
       const [w, h] = resolution.split('x').map(Number);
       const data = await api.startVirtualCam(selectedDevice, w, h, fps);
       setActive(data.status === 'ok');
-    } catch {
+    } catch (e) {
       setActive(false);
+      setError(e instanceof Error ? e.message : 'Could not start virtual camera');
     } finally {
       setLoading(false);
     }
@@ -52,7 +56,9 @@ export default function VirtualCamPanel() {
     try {
       await api.stopVirtualCam();
       setActive(false);
-    } catch {}
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not stop virtual camera');
+    }
   };
 
   const getTypeBadge = (type: string) => {
@@ -67,6 +73,7 @@ export default function VirtualCamPanel() {
 
   return (
     <div className="flex flex-col gap-3 md:gap-4">
+      {error && <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       <div className="flex items-center justify-between">
         <h2 className="text-xs md:text-sm font-semibold text-gray-300 uppercase tracking-wider">Virtual Camera</h2>
         {active ? (

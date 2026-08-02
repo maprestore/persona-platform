@@ -1,15 +1,42 @@
+
 """Persona Platform CLI - local face swap for video calls."""
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 import threading
 from pathlib import Path
 
 
+def _detect_platform() -> str:
+    if "TERMUX_VERSION" in os.environ:
+        return "termux"
+    if sys.platform == "linux":
+        return "linux"
+    if sys.platform == "darwin":
+        return "macos"
+    return "other"
+
+
+def _get_local_ip() -> str:
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 def main() -> None:
+    platform = _detect_platform()
+    default_host = "0.0.0.0"
+
     parser = argparse.ArgumentParser(
         prog="persona",
         description="Persona Studio - Real-time face swap for video calls",
@@ -19,14 +46,14 @@ def main() -> None:
     # serve - start API server
     serve = sub.add_parser("serve", help="Start API server")
     serve.add_argument("--port", type=int, default=6967)
-    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--host", default=default_host)
     serve.add_argument("--source", type=str, default=None, help="Source image file")
     serve.add_argument("--device", default="cpu")
 
     # run - start everything for local use
     run = sub.add_parser("run", help="Start with source and output to virtual camera")
     run.add_argument("--port", type=int, default=6967)
-    run.add_argument("--host", default="127.0.0.1")
+    run.add_argument("--host", default=default_host)
     run.add_argument("--source", type=str, default=None, help="Source image or video file path")
     run.add_argument("--device", default="cpu")
     run.add_argument("--cam-name", default="Persona Camera")
@@ -47,22 +74,31 @@ def main() -> None:
     swap.add_argument("--output", "-o", type=str, default=None)
     swap.add_argument("--device", default="cpu")
 
+    # phone - start server optimized for phone use
+    phone = sub.add_parser("phone", help="Start in phone mode (CPU, no virtual cam, accessible on network)")
+    phone.add_argument("--port", type=int, default=6967)
+    phone.add_argument("--host", default=default_host)
+    phone.add_argument("--source", type=str, default=None)
+    phone.add_argument("--device", default="cpu")
+
     args = parser.parse_args()
 
     if args.command == "serve":
-        _cmd_serve(args)
+        _cmd_serve(args, platform)
     elif args.command == "run":
-        _cmd_run(args)
+        _cmd_run(args, platform)
     elif args.command == "cam":
         _cmd_cam(args)
     elif args.command == "swap":
         _cmd_swap(args)
+    elif args.command == "phone":
+        _cmd_phone(args, platform)
     else:
         parser.print_help()
         sys.exit(1)
 
 
-def _cmd_serve(args: argparse.Namespace) -> None:
+def _cmd_serve(args: argparse.Namespace, platform: str = "") -> None:
     from sdk.server import create_app
     import uvicorn
     import cv2
@@ -79,12 +115,19 @@ def _cmd_serve(args: argparse.Namespace) -> None:
                 engine.set_source(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
                 print(f"[persona] Loaded source: {args.source}")
 
+    local_ip = _get_local_ip()
+    print(f"[persona] Platform:   {platform or _detect_platform()}")
     print(f"[persona] API server: http://{args.host}:{args.port}")
-    print(f"[persona] Web UI:     http://{args.host}:{args.port}/ui/  (if frontend built)")
+    print(f"[persona] Local:      http://{local_ip}:{args.port}")
+    print(f"[persona] Webcam:     http://{local_ip}:{args.port}/cam")
+    print(f"[persona] Device:     {args.device}")
+    if platform == "termux":
+        print(f"[persona] On phone, open http://localhost:{args.port}/cam locally")
+        print(f"[persona] Or from laptop, open http://{local_ip}:{args.port}/cam")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
-def _cmd_run(args: argparse.Namespace) -> None:
+def _cmd_run(args: argparse.Namespace, platform: str = "") -> None:
     import subprocess
     from sdk.server import create_app
     import uvicorn
@@ -105,15 +148,17 @@ def _cmd_run(args: argparse.Namespace) -> None:
             engine.set_source(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
             print(f"[persona] Loaded source: {source_path}")
 
-    # Start virtual camera (try multiple backends)
-    vcam = VirtualCamera(name=args.cam_name, width=1280, height=720, fps=30)
-    started = vcam.start()
-    if started:
-        print(f"[persona] Virtual camera '{args.cam_name}' started")
+    # Start virtual camera - skip on Termux
+    vcam = None
+    if platform != "termux":
+        vcam = VirtualCamera(name=args.cam_name, width=1280, height=720, fps=30)
+        started = vcam.start()
+        if started:
+            print(f"[persona] Virtual camera '{args.cam_name}' started")
+        else:
+            print("[persona] Virtual camera not available")
     else:
-        print("[persona] No virtual camera backend found")
-        print("  On Linux: sudo modprobe v4l2loopback")
-        print("  On Windows/Mac: pip install pyvirtualcam")
+        print("[persona] Virtual camera skipped (phone mode)")
 
     # Start API server in background
     app = create_app()
@@ -124,23 +169,24 @@ def _cmd_run(args: argparse.Namespace) -> None:
     server_thread = threading.Thread(target=_run_server, daemon=True)
     server_thread.start()
 
-    # Start frontend dev server in background
-    frontend_dir = Path(__file__).resolve().parent.parent / "no-code-pipeline" / "frontend"
+    # Start frontend dev server in background (skip on phone)
     frontend_proc = None
-    if frontend_dir.exists():
-        try:
-            frontend_proc = subprocess.Popen(
-                ["npx", "vite", "--host", args.host, "--port", str(args.port + 1)],
-                cwd=str(frontend_dir),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            print(f"[persona] Frontend: http://{args.host}:{args.port + 1}")
-        except FileNotFoundError:
-            print("[persona] npm not found, frontend not available")
+    if platform != "termux":
+        frontend_dir = Path(__file__).resolve().parent / "no-code-pipeline" / "frontend"
+        if frontend_dir.exists():
+            try:
+                frontend_proc = subprocess.Popen(
+                    ["npx", "vite", "--host", args.host, "--port", str(args.port + 1)],
+                    cwd=str(frontend_dir),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                print(f"[persona] Frontend: http://{args.host}:{args.port + 1}")
+            except FileNotFoundError:
+                print("[persona] npm not found, frontend not available")
 
     # If source is a video, stream it to virtual camera
-    if source_path and source_path.exists():
+    if vcam and source_path and source_path.exists():
         ext = source_path.suffix.lower()
         if ext in (".mp4", ".avi", ".mov", ".mkv", ".webm"):
             threading.Thread(
@@ -149,18 +195,17 @@ def _cmd_run(args: argparse.Namespace) -> None:
                 daemon=True,
             ).start()
 
-    api_url = f"http://{args.host}:{args.port}"
-    frontend_url = f"http://{args.host}:{args.port + 1}"
+    local_ip = _get_local_ip()
+    api_url = f"http://{local_ip}:{args.port}"
+    frontend_url = f"http://{local_ip}:{args.port + 1}"
 
     print(f"\n[persona] Running!")
-    print(f"  Web UI:   {frontend_url}")
+    print(f"  Platform: {platform}")
     print(f"  API:      {api_url}")
-    print(f"  Camera:   {args.cam_name}")
+    print(f"  Cam:      {api_url}/cam")
     print(f"  Source:   {args.source or 'upload via web UI'}")
-    print(f"\nTo use in video calls:")
-    print(f"  1. Select '{args.cam_name}' as your camera in Zoom/Teams/Discord")
-    print(f"  2. Upload face in the web UI")
-    print(f"  3. Face swap will appear in your video call")
+    print(f"\nUsing on phone: open {api_url}/cam in browser")
+    print(f"Using on laptop: screen-share cam tab in video calls")
     print("\nPress Ctrl+C to stop")
 
     try:
@@ -169,7 +214,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         print("\n[persona] Shutting down...")
     finally:
-        vcam.stop()
+        if vcam:
+            vcam.stop()
         engine.unload()
         if frontend_proc:
             frontend_proc.terminate()
@@ -249,7 +295,8 @@ def _cmd_cam(args: argparse.Namespace) -> None:
             if source_path.exists():
                 img = cv2.imread(str(source_path))
                 if img is not None:
-                    engine.set_source(img)
+                    import numpy as np
+                    engine.set_source(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
                     print(f"[persona] Source: {args.source}")
 
                     if args.action == "stream":
@@ -325,6 +372,37 @@ def _cmd_swap(args: argparse.Namespace) -> None:
     print(f"[persona] Saved: {output_path}")
 
     engine.unload()
+
+
+def _cmd_phone(args: argparse.Namespace, platform: str) -> None:
+    from sdk.server import create_app
+    import uvicorn
+    import cv2
+
+    app = create_app()
+
+    if args.source:
+        source_path = Path(args.source)
+        if source_path.exists():
+            img_bgr = cv2.imread(str(source_path))
+            if img_bgr is not None:
+                from sdk.server import _engine_state
+                engine = _engine_state.get_engine()
+                engine.set_source(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+                print(f"[persona] Loaded source: {args.source}")
+
+    local_ip = _get_local_ip()
+    print(f"\n[persona] Phone mode on {platform}")
+    print(f"[persona] Server:  http://{args.host}:{args.port}")
+    print(f"[persona] Local:   http://{local_ip}:{args.port}")
+    print(f"[persona] Webcam:  http://{local_ip}:{args.port}/cam")
+    print(f"[persona] Device:  {args.device}")
+    if platform == "termux":
+        print(f"[persona] Open http://localhost:{args.port}/cam locally")
+    print(f"[persona] From laptop, open http://{local_ip}:{args.port}/cam")
+    print(f"[persona] Tap 'Pair' on the cam page to show QR code")
+    print()
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
 if __name__ == "__main__":

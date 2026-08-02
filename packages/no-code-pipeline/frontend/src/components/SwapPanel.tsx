@@ -1,4 +1,5 @@
-import React, { useRef } from 'react';
+
+import React, { useRef, useState } from 'react';
 import { api } from '../api';
 
 interface Props {
@@ -28,6 +29,7 @@ export default function SwapPanel({
 }: Props) {
   const sourceRef = useRef<HTMLInputElement>(null);
   const targetRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleUpload = async (file: File, type: 'source' | 'target') => {
     if (type === 'source') {
@@ -40,12 +42,13 @@ export default function SwapPanel({
       if (type === 'source') onSourceId(data.file_id);
       else onTargetId(data.file_id);
     } catch (e) {
-      console.error('Upload failed:', e);
+      setError(e instanceof Error ? e.message : 'Upload failed');
     }
   };
 
   return (
     <div className="flex flex-col gap-3 md:gap-4">
+      {error && <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Face Swap</h2>
 
       {/* Source & Target - Side by side on mobile */}

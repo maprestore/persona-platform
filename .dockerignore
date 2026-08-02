@@ -1,0 +1,61 @@
+# Git
+.git
+.github
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+venv
+.pytest_cache
+.mypy_cache
+
+# Node
+node_modules
+.npm
+
+# Build artifacts
+*.apk
+*.deb
+*.log
+*.pid
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dev files
+*.save
+*.bak
+*.backup
+test.png
+conftest.py
+check.py
+check_hardware.py
+duplicate_finder.py
+REFACTOR_*.md
+QUICK_START.txt
+WORKFLOW.txt
+SESSION_SAVE.txt
+
+# Large files
+dump.rdb
+minecraft_parkour.mp4
+reddit_videos/
+
+# Docker (prevent recursive copy)
+docker/docker-compose.yml
+
+# Termux-specific
+.p10k.zsh
+.zcompdump*
+.zsh_history

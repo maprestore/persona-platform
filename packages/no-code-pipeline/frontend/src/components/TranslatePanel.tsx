@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { api } from '../api';
 
@@ -24,11 +25,18 @@ export default function TranslatePanel() {
   const [processing, setProcessing] = useState(false);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (f: File) => {
     setAudioFile(f);
-    const data = await api.upload(f);
+    let data;
+    try {
+      data = await api.upload(f);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed');
+      return;
+    }
     setAudioId(data.file_id);
   };
 
@@ -42,7 +50,7 @@ export default function TranslatePanel() {
         setResultUrl(api.getOutputUrl(data.output_audio_id));
       }
     } catch (e) {
-      console.error('Translation failed:', e);
+      setError(e instanceof Error ? e.message : 'Translation failed');
     } finally {
       setProcessing(false);
     }
@@ -50,6 +58,7 @@ export default function TranslatePanel() {
 
   return (
     <div className="max-w-2xl mx-auto flex flex-col gap-4">
+      {error && <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">AI Video Translator</h2>
       <p className="text-xs text-gray-500">Translate audio and video with AI-powered dubbing</p>
 

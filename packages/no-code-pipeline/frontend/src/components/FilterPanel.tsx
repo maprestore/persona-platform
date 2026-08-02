@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { api } from '../api';
 
@@ -32,16 +33,23 @@ export default function FilterPanel() {
   const [processing, setProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [filters, setFilters] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api.listFilters().then((data) => setFilters(data.filters || [])).catch(() => {});
+    api.listFilters().then((data) => setFilters(data.filters || [])).catch((e) => setError(e instanceof Error ? e.message : 'Could not load data'));
   }, []);
 
   const handleFile = async (f: File) => {
     setFile(f);
     setPreview(URL.createObjectURL(f));
-    const data = await api.upload(f);
+    let data;
+    try {
+      data = await api.upload(f);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed');
+      return;
+    }
     setFileId(data.file_id);
   };
 
@@ -54,7 +62,7 @@ export default function FilterPanel() {
         setResultUrl(api.getOutputUrl(data.output_id));
       }
     } catch (e) {
-      console.error('Filter failed:', e);
+      setError(e instanceof Error ? e.message : 'Filter processing failed');
     } finally {
       setProcessing(false);
     }
@@ -62,6 +70,7 @@ export default function FilterPanel() {
 
   return (
     <div className="max-w-3xl mx-auto flex flex-col gap-4">
+      {error && <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div>}
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Filters & Effects</h2>
       <p className="text-xs text-gray-500">Apply artistic filters and effects to your images</p>
 

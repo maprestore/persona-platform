@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  persona-studio:
+    build:
+      context: ..
+      dockerfile: saas/Dockerfile
+    ports:
+      - "8000:8000"
+      - "6967:6967"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - PERSONA_ENGINE_URL=http://localhost:6967
+      - PERSONA_DEVICE=cuda
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - persona-data:/app/data
+      - persona-uploads:/app/uploads
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/auth/login"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  persona-data:
+  persona-uploads:

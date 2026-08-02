@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import numpy as np
@@ -10,16 +11,26 @@ class VoiceClonerEngine:
         self._loaded = False
         self._samples: dict[str, npt.NDArray[np.float32]] = {}
         self._sample_rates: dict[str, int] = {}
+        self._load_error: str | None = None
 
     def load(self, device: str = "cuda") -> None:
         self._device = device
         self._loaded = True
         self._whisper_model = None
+        self._load_error = None
         try:
             import whisper
             self._whisper_model = whisper.load_model("base", device=self._device)
-        except ImportError:
-            pass
+        except ImportError as exc:
+            self._load_error = str(exc) or "optional voice dependencies are missing"
+
+    @property
+    def available(self) -> bool:
+        return self._loaded
+
+    @property
+    def load_error(self) -> str | None:
+        return self._load_error
 
     def add_voice_sample(
         self, name: str, audio: npt.NDArray[np.float32], sample_rate: int = 16000
@@ -46,14 +57,16 @@ class VoiceClonerEngine:
         pitch_shift: float = 0.0,
         formant_shift: float = 0.0,
     ) -> npt.NDArray[np.float32]:
-        if not self._loaded or target_voice is None or target_voice not in self._samples:
+        if target_voice is not None and target_voice not in self._samples:
+            raise ValueError(f"Unknown target voice: {target_voice}")
+        if not self._loaded or target_voice is None:
             if pitch_shift != 0.0:
                 return self._apply_pitch_shift(audio, sample_rate, pitch_shift)
             return audio
 
         try:
             return self._voice_convert_rvc(audio, sample_rate, target_voice, pitch_shift)
-        except (ImportError, Exception):
+        except ImportError:
             return self._voice_convert_stretch(audio, sample_rate, target_voice, pitch_shift)
 
     def _voice_convert_rvc(

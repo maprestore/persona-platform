@@ -1,3 +1,4 @@
+
 import os
 from setuptools import setup
 
@@ -5,7 +6,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _local(path: str) -> str:
-    return f"file://{os.path.join(HERE, path)}"
+    return os.path.join(HERE, path)
 
 
 setup(

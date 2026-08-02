@@ -1,3 +1,4 @@
+
 {
   "nodes": [
     {"node_id": "cam1", "node_type": "input", "params": {"source": "webcam:0"}},

@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import numpy as np
@@ -51,10 +52,10 @@ class FilterParams:
 @dataclass
 class TuningParams:
     face_align_strength: float = 1.0
-    blend_ratio: float = 0.7
+    blend_ratio: float = 0.85
     color_correction: bool = True
-    smoothness: float = 0.5
-    edge_feathering: float = 0.3
+    smoothness: float = 0.3
+    edge_feathering: float = 0.4
     brightness_adapt: bool = True
     landmark_smoothing: bool = True
 

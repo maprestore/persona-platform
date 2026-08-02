@@ -1,3 +1,4 @@
+
 """Example using the SDK client."""
 
 from sdk.client import PersonaClient

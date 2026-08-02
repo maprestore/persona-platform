@@ -1,3 +1,4 @@
+
 [project]
 name = "persona-platform"
 version = "0.1.0"
@@ -42,7 +43,6 @@ sdk = [
     "fastapi>=0.100",
     "uvicorn>=0.20",
     "websockets>=10",
-    "redis>=4.0",
 ]
 # inference
 engine = [

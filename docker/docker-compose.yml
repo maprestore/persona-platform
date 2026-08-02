@@ -1,3 +1,4 @@
+
 services:
   persona-api:
     build:

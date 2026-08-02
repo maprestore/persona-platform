@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import numpy as np
@@ -26,7 +27,7 @@ class BackgroundRemover:
                 return self._remove_cv2(image)
             else:
                 return self._remove_auto(image)
-        except (ImportError, Exception):
+        except Exception:
             h, w = image.shape[:2]
             mask = np.ones((h, w), dtype=np.uint8) * 255
             return mask, image
@@ -73,6 +74,9 @@ class BackgroundRemover:
         kernel_size: int = 31,
         method: str = "auto",
     ) -> npt.NDArray[np.uint8]:
+        kernel_size = max(3, int(kernel_size))
+        if kernel_size % 2 == 0:
+            kernel_size += 1
         try:
             import cv2
             fg_mask, _ = self.remove_background(image, method)
@@ -88,10 +92,10 @@ class BackgroundRemover:
     ) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
         try:
             return self._remove_rembg(image)
-        except (ImportError, Exception):
+        except Exception:
             try:
                 return self._remove_cv2(image)
-            except (ImportError, Exception):
+            except Exception:
                 h, w = image.shape[:2]
                 mask = np.ones((h, w), dtype=np.uint8) * 255
                 return mask, image

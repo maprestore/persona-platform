@@ -1,7 +1,11 @@
+
 from __future__ import annotations
 
+import logging
 import numpy as np
 import numpy.typing as npt
+
+logger = logging.getLogger(__name__)
 
 
 class VoiceConvertEngine:
@@ -9,11 +13,12 @@ class VoiceConvertEngine:
         self._model = None
         self._device = "cpu"
         self._crepe_model = None
-        self._samples: dict[str, npt.NDArray[np.float32]] = {}
-        self._sample_rates: dict[str, int] = {}
+        self._whisper_model = None
+        self._load_error: str | None = None
 
     def load(self, device: str = "cuda") -> None:
         self._device = device
+        self._load_error = None
         self._whisper_model = None
         try:
             import torch
@@ -27,8 +32,16 @@ class VoiceConvertEngine:
         try:
             import whisper
             self._whisper_model = whisper.load_model("base", device=self._device)
-        except ImportError:
-            pass
+        except ImportError as exc:
+            self._load_error = str(exc) or "optional voice dependencies are missing"
+
+    @property
+    def available(self) -> bool:
+        return self._crepe_model is not None or self._whisper_model is not None
+
+    @property
+    def load_error(self) -> str | None:
+        return self._load_error
 
     def convert(
         self,
@@ -116,8 +129,10 @@ class VoiceConvertEngine:
         sample_rate: int,
         semitones: float,
     ) -> npt.NDArray[np.float32]:
+        if len(audio) == 0:
+            return audio.astype(np.float32)
         factor = 2 ** (semitones / 12.0)
-        new_len = int(len(audio) / factor)
+        new_len = max(1, int(len(audio) / factor))
         indices = np.linspace(0, len(audio) - 1, new_len)
         shifted = np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
 
@@ -184,5 +199,4 @@ class VoiceConvertEngine:
     def unload(self) -> None:
         self._model = None
         self._crepe_model = None
-        self._samples.clear()
-        self._sample_rates.clear()
+        self._whisper_model = None

@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from shared.types import VideoFrame, AudioFrame, DeviceType, FaceDetection, BodyPose

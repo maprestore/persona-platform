@@ -1,5 +1,6 @@
+
 from .engine import PersonaSwapCore
-from .engines import FaceSwapEngine, VoiceConvertEngine, VoiceClonerEngine, LivePortraitEngine, BackgroundRemover, EffectsPipeline
+from .engines import FaceSwapEngine, VoiceConvertEngine, VoiceClonerEngine, LivePortraitEngine, BackgroundRemover, EffectsPipeline, AdvancedTrackingEngine
 
 __all__ = [
     "PersonaSwapCore",
@@ -9,4 +10,5 @@ __all__ = [
     "LivePortraitEngine",
     "BackgroundRemover",
     "EffectsPipeline",
+    "AdvancedTrackingEngine",
 ]
