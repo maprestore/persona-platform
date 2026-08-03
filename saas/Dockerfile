@@ -16,6 +16,9 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
+# Set Python path for imports
+ENV PYTHONPATH="/app/saas/backend:/app/packages/shared/src:/app/packages/persona-swap-core/src:/app/packages/sdk/src:/app/packages/magiclip/src:${PYTHONPATH}"
+
 # Copy requirements first for layer caching
 COPY saas/backend/requirements.txt /app/saas/backend/requirements.txt
 COPY pyproject.toml Makefile /app/
@@ -49,7 +52,8 @@ RUN cd saas/frontend && \
     npm run build
 
 # Initialize database and create admin
-RUN python3 -c "from saas.backend.models import init_db, seed_default_data; init_db(); seed_default_data()"
+ENV PYTHONPATH="/app/saas/backend:${PYTHONPATH}"
+RUN python3 -c "from models import init_db, seed_default_data; init_db(); seed_default_data()"
 
 # Create necessary directories
 RUN mkdir -p /app/uploads /app/data
