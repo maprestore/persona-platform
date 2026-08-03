@@ -5,10 +5,12 @@ ENV PYTHONUNBUFFERED=1
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV CUDA_VISIBLE_DEVICES=0
 
-# Install system dependencies
+# Install system dependencies (Python + Node.js)
 RUN apt-get update && apt-get install -y \
     python3.10 python3-pip python3.10-venv \
     git ffmpeg libgl1 libglib2.0-0 curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
