@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: ${{ github.repository_owner }}/persona-studio
+  IMAGE_NAME: timmydon/persona-studio
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
