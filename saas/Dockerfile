@@ -27,10 +27,12 @@ RUN pip install --upgrade pip && \
 COPY packages/ packages/
 
 # Install persona-platform packages (engine + SDK)
-RUN pip install -e packages/shared && \
-    pip install -e packages/persona-swap-core && \
-    pip install -e packages/magiclip && \
-    pip install -e packages/sdk
+# Use --no-deps to avoid file:// URI resolution issues, then install transitive deps separately
+RUN pip install packages/shared && \
+    pip install --no-deps packages/persona-swap-core && \
+    pip install --no-deps packages/magiclip && \
+    pip install --no-deps packages/sdk && \
+    pip install opencv-python pillow librosa scipy fastapi uvicorn websockets python-multipart httpx
 
 # Install PyTorch with CUDA support
 RUN pip uninstall -y torch torchvision 2>/dev/null; \
