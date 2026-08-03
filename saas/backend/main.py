@@ -279,6 +279,7 @@ def get_history(
                 "swap_type": s.swap_type,
                 "credits_used": s.credits_used,
                 "status": s.status,
+                "error": s.error_message,
                 "created_at": s.created_at.isoformat(),
             }
             for s in swaps
@@ -524,6 +525,8 @@ async def swap_faces(
     db.add(tx)
     db.commit()
 
+    error_message = None
+
     # Forward to persona engine
     try:
         source_path = UPLOAD_DIR / f"{req.source_id}"
@@ -532,25 +535,29 @@ async def swap_faces(
         # Find actual files with extensions
         source_file = None
         target_file = None
-        for ext in ['.jpg', '.jpeg', '.png', '.webp']:
+        for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']:
             if (UPLOAD_DIR / f"{req.source_id}{ext}").exists():
                 source_file = UPLOAD_DIR / f"{req.source_id}{ext}"
             if (UPLOAD_DIR / f"{req.target_id}{ext}").exists():
                 target_file = UPLOAD_DIR / f"{req.target_id}{ext}"
 
-        if source_file:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                # Step 1: Upload source file to engine
-                with open(source_file, "rb") as sf:
-                    src_resp = await client.post(
-                        f"{ENGINE_URL}/upload",
-                        files={"file": (source_file.name, sf, "image/jpeg")},
-                    )
-                if src_resp.status_code != 200:
-                    raise Exception(f"Engine upload source failed: {src_resp.text}")
-                engine_source_id = src_resp.json()["file_id"]
+        if not source_file:
+            raise Exception(f"Source file not found for ID: {req.source_id}")
 
-                # Step 2: Upload target file to engine
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Step 1: Upload source file to engine
+            with open(source_file, "rb") as sf:
+                src_resp = await client.post(
+                    f"{ENGINE_URL}/upload",
+                    files={"file": (source_file.name, sf, "image/jpeg")},
+                )
+            if src_resp.status_code != 200:
+                raise Exception(f"Engine upload source failed: {src_resp.text}")
+            engine_source_id = src_resp.json()["file_id"]
+
+            # Step 2: Upload target file to engine (if needed)
+            engine_target_id = None
+            if target_file:
                 with open(target_file, "rb") as tf:
                     tgt_resp = await client.post(
                         f"{ENGINE_URL}/upload",
@@ -560,75 +567,87 @@ async def swap_faces(
                     raise Exception(f"Engine upload target failed: {tgt_resp.text}")
                 engine_target_id = tgt_resp.json()["file_id"]
 
-                # Step 3: Call appropriate engine endpoint based on swap type
-                if req.swap_type == "background":
-                    resp = await client.post(
-                        f"{ENGINE_URL}/background-remove",
-                        json={"file_id": engine_source_id, "method": "auto"},
-                    )
-                elif req.swap_type == "filter":
-                    resp = await client.post(
-                        f"{ENGINE_URL}/apply-filter",
-                        json={"file_id": engine_source_id, "filter_name": "enhance", "intensity": 1.0},
-                    )
-                elif req.swap_type == "portrait":
-                    resp = await client.post(
-                        f"{ENGINE_URL}/live-portrait",
-                        json={"source_id": engine_source_id, "expression": "smile", "intensity": 1.0, "num_frames": 30},
-                    )
-                elif req.swap_type == "voice":
-                    resp = await client.post(
-                        f"{ENGINE_URL}/voice-clone/convert",
-                        json={"file_id": engine_source_id, "pitch_shift": 0.0},
-                    )
-                else:
-                    # Default: face swap (requires target)
-                    if not engine_target_id:
-                        raise Exception("Face swap requires a target image")
-                    resp = await client.post(
-                        f"{ENGINE_URL}/swap",
-                        json={
-                            "source_id": engine_source_id,
-                            "target_id": engine_target_id,
-                            "no_watermark": True,
-                        },
-                    )
+            # Step 3: Call appropriate engine endpoint based on swap type
+            if req.swap_type == "background":
+                resp = await client.post(
+                    f"{ENGINE_URL}/background-remove",
+                    json={"file_id": engine_source_id, "method": "auto"},
+                )
+            elif req.swap_type == "filter":
+                resp = await client.post(
+                    f"{ENGINE_URL}/apply-filter",
+                    json={"file_id": engine_source_id, "filter_name": "enhance", "intensity": 1.0},
+                )
+            elif req.swap_type == "portrait":
+                resp = await client.post(
+                    f"{ENGINE_URL}/live-portrait",
+                    json={"source_id": engine_source_id, "expression": "smile", "intensity": 1.0, "num_frames": 30},
+                )
+            elif req.swap_type in ("voice", "voice_clone"):
+                resp = await client.post(
+                    f"{ENGINE_URL}/voice-clone/convert",
+                    json={"file_id": engine_source_id, "pitch_shift": 0.0},
+                )
+            else:
+                # Default: face swap (requires target)
+                if not engine_target_id:
+                    raise Exception("Face swap requires a target image")
+                resp = await client.post(
+                    f"{ENGINE_URL}/swap",
+                    json={
+                        "source_id": engine_source_id,
+                        "target_id": engine_target_id,
+                        "no_watermark": True,
+                    },
+                )
 
-                if resp.status_code == 200:
-                    result_data = resp.json()
-                    output_id = result_data.get("output_id", "")
-                    output_url = result_data.get("output_url", "")
+            if resp.status_code == 200:
+                result_data = resp.json()
+                output_id = result_data.get("output_id", "")
+                output_url = result_data.get("output_url", "")
 
-                    # Download result from engine
-                    if output_url:
-                        result_resp = await client.get(f"{ENGINE_URL}{output_url}")
-                        if result_resp.status_code == 200:
-                            result_path = UPLOAD_DIR / f"{swap.id}_result.jpg"
-                            result_path.write_bytes(result_resp.content)
-                            swap.output_file = str(result_path)
-                            swap.status = "completed"
-                            db.commit()
-                        else:
-                            swap.status = "failed"
-                            db.commit()
-                    else:
-                        swap.status = "failed"
+                # Download result from engine
+                if output_url:
+                    result_resp = await client.get(f"{ENGINE_URL}{output_url}")
+                    if result_resp.status_code == 200:
+                        result_path = UPLOAD_DIR / f"{swap.id}_result.jpg"
+                        result_path.write_bytes(result_resp.content)
+                        swap.output_file = str(result_path)
+                        swap.status = "completed"
                         db.commit()
+                    else:
+                        raise Exception(f"Failed to download result from engine: {result_resp.status_code}")
                 else:
-                    swap.status = "failed"
-                    db.commit()
-        else:
-            swap.status = "failed"
-            db.commit()
+                    raise Exception("Engine returned no output URL")
+            else:
+                raise Exception(f"Engine processing failed: {resp.status_code} - {resp.text}")
+
     except Exception as e:
+        error_message = str(e)
         swap.status = "failed"
+        swap.error_message = error_message
+        db.commit()
+
+        # Refund credits on failure
+        current_user.credits += pricing.credits_cost
+        refund_tx = Transaction(
+            user_id=current_user.id,
+            type="refund",
+            amount=pricing.credits_cost,
+            credits_before=current_user.credits - pricing.credits_cost,
+            credits_after=current_user.credits,
+            status="confirmed",
+            description=f"Refund: {req.swap_type} swap failed - {error_message}",
+        )
+        db.add(refund_tx)
         db.commit()
 
     return {
         "swap_id": swap.id,
         "status": swap.status,
-        "credits_used": pricing.credits_cost,
+        "credits_used": pricing.credits_cost if swap.status == "completed" else 0,
         "credits_remaining": current_user.credits,
+        "error": error_message,
     }
 
 
@@ -648,6 +667,7 @@ def swap_status(
         "id": swap.id,
         "status": swap.status,
         "output_file": swap.output_file,
+        "error": swap.error_message,
         "created_at": swap.created_at.isoformat(),
     }
 
@@ -893,6 +913,7 @@ def admin_list_swaps(
                 "source_file": s.source_file,
                 "target_file": s.target_file,
                 "output_file": s.output_file,
+                "error": s.error_message,
                 "created_at": s.created_at.isoformat(),
             }
             for s in swaps
@@ -1946,95 +1967,120 @@ async def swap_from_template(
     db.add(tx)
     db.commit()
 
+    error_message = None
+
     # Forward to engine
     try:
         source_file = None
         target_file = None
-        for ext in ['.jpg', '.jpeg', '.png', '.webp']:
+        for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']:
             if (UPLOAD_DIR / f"{source_id}{ext}").exists():
                 source_file = UPLOAD_DIR / f"{source_id}{ext}"
             if target_id and (UPLOAD_DIR / f"{target_id}{ext}").exists():
                 target_file = UPLOAD_DIR / f"{target_id}{ext}"
 
-        if source_file:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                with open(source_file, "rb") as sf:
-                    src_resp = await client.post(
+        if not source_file:
+            raise Exception(f"Source file not found for ID: {source_id}")
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            with open(source_file, "rb") as sf:
+                src_resp = await client.post(
+                    f"{ENGINE_URL}/upload",
+                    files={"file": (source_file.name, sf, "image/jpeg")},
+                )
+            if src_resp.status_code != 200:
+                raise Exception(f"Engine upload failed: {src_resp.text}")
+            engine_source_id = src_resp.json()["file_id"]
+
+            engine_target_id = None
+            if target_file:
+                with open(target_file, "rb") as tf:
+                    tgt_resp = await client.post(
                         f"{ENGINE_URL}/upload",
-                        files={"file": (source_file.name, sf, "image/jpeg")},
+                        files={"file": (target_file.name, tf, "image/jpeg")},
                     )
-                if src_resp.status_code != 200:
-                    raise Exception(f"Engine upload failed: {src_resp.text}")
-                engine_source_id = src_resp.json()["file_id"]
+                if tgt_resp.status_code == 200:
+                    engine_target_id = tgt_resp.json()["file_id"]
 
-                engine_target_id = None
-                if target_file:
-                    with open(target_file, "rb") as tf:
-                        tgt_resp = await client.post(
-                            f"{ENGINE_URL}/upload",
-                            files={"file": (target_file.name, tf, "image/jpeg")},
-                        )
-                    if tgt_resp.status_code == 200:
-                        engine_target_id = tgt_resp.json()["file_id"]
+            # Call appropriate endpoint based on template type
+            swap_type = template["type"]
+            if swap_type == "background":
+                resp = await client.post(
+                    f"{ENGINE_URL}/background-remove",
+                    json={"file_id": engine_source_id, "method": "auto"},
+                )
+            elif swap_type == "filter":
+                resp = await client.post(
+                    f"{ENGINE_URL}/apply-filter",
+                    json={"file_id": engine_source_id, "filter_name": "enhance", "intensity": 1.0},
+                )
+            elif swap_type == "portrait":
+                resp = await client.post(
+                    f"{ENGINE_URL}/live-portrait",
+                    json={"source_id": engine_source_id, "expression": "smile", "intensity": 1.0, "num_frames": 30},
+                )
+            elif swap_type in ("voice", "voice_clone"):
+                resp = await client.post(
+                    f"{ENGINE_URL}/voice-clone/convert",
+                    json={"file_id": engine_source_id, "pitch_shift": 0.0},
+                )
+            else:
+                if not engine_target_id:
+                    raise Exception("Target file required for face swap")
+                resp = await client.post(
+                    f"{ENGINE_URL}/swap",
+                    json={
+                        "source_id": engine_source_id,
+                        "target_id": engine_target_id,
+                        "no_watermark": True,
+                    },
+                )
 
-                # Call appropriate endpoint based on template type
-                swap_type = template["type"]
-                if swap_type == "background":
-                    resp = await client.post(
-                        f"{ENGINE_URL}/background-remove",
-                        json={"file_id": engine_source_id, "method": "auto"},
-                    )
-                elif swap_type == "filter":
-                    resp = await client.post(
-                        f"{ENGINE_URL}/apply-filter",
-                        json={"file_id": engine_source_id, "filter_name": "enhance", "intensity": 1.0},
-                    )
-                elif swap_type == "portrait":
-                    resp = await client.post(
-                        f"{ENGINE_URL}/live-portrait",
-                        json={"source_id": engine_source_id, "expression": "smile", "intensity": 1.0, "num_frames": 30},
-                    )
-                elif swap_type == "voice":
-                    resp = await client.post(
-                        f"{ENGINE_URL}/voice-clone/convert",
-                        json={"file_id": engine_source_id, "pitch_shift": 0.0},
-                    )
+            if resp.status_code == 200:
+                result_data = resp.json()
+                output_url = result_data.get("output_url", "")
+                if output_url:
+                    result_resp = await client.get(f"{ENGINE_URL}{output_url}")
+                    if result_resp.status_code == 200:
+                        result_path = UPLOAD_DIR / f"{swap.id}_result.jpg"
+                        result_path.write_bytes(result_resp.content)
+                        swap.output_file = str(result_path)
+                        swap.status = "completed"
+                        db.commit()
+                    else:
+                        raise Exception(f"Failed to download result: {result_resp.status_code}")
                 else:
-                    if not engine_target_id:
-                        raise HTTPException(status_code=400, detail="Target file required for face swap")
-                    resp = await client.post(
-                        f"{ENGINE_URL}/swap",
-                        json={
-                            "source_id": engine_source_id,
-                            "target_id": engine_target_id,
-                            "no_watermark": True,
-                        },
-                    )
+                    raise Exception("Engine returned no output URL")
+            else:
+                raise Exception(f"Engine processing failed: {resp.status_code} - {resp.text}")
 
-                if resp.status_code == 200:
-                    result_data = resp.json()
-                    output_url = result_data.get("output_url", "")
-                    if output_url:
-                        result_resp = await client.get(f"{ENGINE_URL}{output_url}")
-                        if result_resp.status_code == 200:
-                            result_path = UPLOAD_DIR / f"{swap.id}_result.jpg"
-                            result_path.write_bytes(result_resp.content)
-                            swap.output_file = str(result_path)
-                            swap.status = "completed"
-                            db.commit()
-                else:
-                    swap.status = "failed"
-                    db.commit()
     except Exception as e:
+        error_message = str(e)
         swap.status = "failed"
+        swap.error_message = error_message
+        db.commit()
+
+        # Refund credits on failure
+        current_user.credits += cost
+        refund_tx = Transaction(
+            user_id=current_user.id,
+            type="refund",
+            amount=cost,
+            credits_before=current_user.credits - cost,
+            credits_after=current_user.credits,
+            status="confirmed",
+            description=f"Refund: {template['name']} failed - {error_message}",
+        )
+        db.add(refund_tx)
         db.commit()
 
     return {
         "swap_id": swap.id,
         "template": template["name"],
         "status": swap.status,
-        "credits_used": cost,
+        "credits_used": cost if swap.status == "completed" else 0,
         "credits_remaining": current_user.credits,
+        "error": error_message,
     }
 
 

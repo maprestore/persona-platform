@@ -60,6 +60,7 @@ class SwapHistory(Base):
     source_file = Column(String(255), nullable=True)
     target_file = Column(String(255), nullable=True)
     output_file = Column(String(255), nullable=True)
+    error_message = Column(Text, nullable=True)
     status = Column(String(20), default="pending")  # pending, processing, completed, failed
     created_at = Column(DateTime, default=utcnow)
 
@@ -219,6 +220,7 @@ def seed_default_data():
             PricingConfig(feature="background", credits_cost=1.0, description="Background removal/replacement"),
             PricingConfig(feature="filter", credits_cost=0.5, description="Apply image filter"),
             PricingConfig(feature="voice", credits_cost=2.0, description="Voice cloning"),
+            PricingConfig(feature="voice_clone", credits_cost=2.0, description="Voice cloning"),
             PricingConfig(feature="voice_convert", credits_cost=1.0, description="Voice conversion"),
             PricingConfig(feature="translate", credits_cost=2.0, description="AI translation"),
         ]
