@@ -1,0 +1,31 @@
+{
+	# Disable automatic HTTPS for Vast.ai (use HTTP behind proxy)
+	auto_https off
+	admin off
+}
+
+:80 {
+	# Reverse proxy to SaaS backend
+	reverse_proxy localhost:8000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# WebSocket support
+	reverse_proxy /room/*/stream localhost:8000 {
+		header_up Connection {>Connection}
+		header_up Upgrade {>Upgrade}
+	}
+
+	# Logging
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Engine direct access (for API calls)
+:6967 {
+	reverse_proxy localhost:6968
+}

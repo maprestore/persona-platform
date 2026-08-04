@@ -13,9 +13,10 @@
 # 4. Click "Rent" on an instance
 # 5. In "Docker Options", enter:
 #    Image: your-dockerhub/persona-studio:latest
-#    Ports: 8000/tcp, 6967/tcp
+#    Ports: 80/tcp, 443/tcp, 6967/tcp
 # 6. In "Environment", set:
 #    JWT_SECRET=<random-secret>
+#    DOMAIN=<your-domain or *>
 # 7. Deploy!
 ```
 
@@ -29,35 +30,31 @@ git add . && git commit -m "Deploy" && git push
 #    Docker Image: (leave blank)
 #    Dockerfile: saas/Dockerfile
 #    Build Context: .
-#    Ports: 8000/tcp, 6967/tcp
+#    Ports: 80/tcp, 443/tcp, 6967/tcp
 ```
 
-### Option 3: Using Vast.ai CLI
+### Option 3: Using Vast.ai API
 
 ```bash
-# Install CLI
-pip install vastai
-
-# Login
-vastai set api-key YOUR_API_KEY
-
 # Search for instances
-vastai search offers gpu_name=RTX\ 4090 num_gpus=1 dph_total<0.50
+curl -X POST -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{"limit":5,"num_gpus":{"eq":1},"gpu_ram":{"gte":16384},"order":[["dph_total","asc"]]} \
+  "https://console.vast.ai/api/v0/bundles/"
 
 # Create instance
-vastai create instance <offer_id> \
-    --image your-dockerhub/persona-studio:latest \
-    --disk 50 \
-    --ssh
+curl -X PUT -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{"image":"timmydon/persona-studio:latest","disk":50,"runtype":"ssh_direct","env":{"JWT_SECRET":"your-secret"}} \
+  "https://console.vast.ai/api/v0/asks/<offer_id>/"
 ```
 
 ## Access Your Deployment
 
 After the instance is running:
 
-- **Frontend**: `http://<instance-ip>:8000`
-- **Admin Panel**: `http://<instance-ip>:8000/admin`
-- **API Docs**: `http://<instance-ip>:8000/docs`
+- **Frontend**: `http://<instance-ip>` (port 80, via Caddy)
+- **Admin Panel**: `http://<instance-ip>/admin`
+- **API Docs**: `http://<instance-ip>/docs`
+- **Engine API**: `http://<instance-ip>:6967` (direct)
 - **SSH Access**: `ssh root@<instance-ip> -p <ssh-port>`
 
 ## Default Credentials
@@ -74,6 +71,26 @@ After the instance is running:
 | `JWT_SECRET` | Secret for JWT tokens | (required) |
 | `PERSONA_ENGINE_URL` | Engine API URL | `http://localhost:6967` |
 | `PERSONA_DEVICE` | Compute device | `cuda` |
+| `DOMAIN` | Domain for Caddy HTTPS | `*` (HTTP only) |
+
+## Architecture
+
+```
+Internet → Caddy (:80/:443) → SaaS Backend (:8000)
+                            → Engine API (:6967)
+```
+
+- **Caddy**: Reverse proxy with automatic HTTPS (when domain provided)
+- **SaaS Backend**: FastAPI + React frontend (port 8000, internal)
+- **Engine**: Face swap + voice + video processing (port 6967, internal)
+
+## Persistent Storage
+
+Docker volumes preserve data across restarts:
+
+- `persona-data`: SQLite database
+- `persona-uploads`: User uploaded files
+- `persona-db`: Backend configuration
 
 ## GPU Recommendations
 
@@ -87,7 +104,7 @@ After the instance is running:
 
 ### Instance won't start
 - Check Docker image exists on Docker Hub
-- Ensure ports 8000 and 6967 are exposed
+- Ensure ports 80, 443, and 6967 are exposed
 - Check Vast.ai instance logs
 
 ### Engine not responding
@@ -98,7 +115,7 @@ After the instance is running:
 ### Can't access from browser
 - Ensure ports are exposed in Vast.ai settings
 - Check firewall rules
-- Try SSH tunnel: `ssh -L 8000:localhost:8000 root@<ip> -p <port>`
+- Try SSH tunnel: `ssh -L 80:localhost:80 root@<ip> -p <port>`
 
 ## Cost Optimization
 

@@ -5,10 +5,15 @@ ENV PYTHONUNBUFFERED=1
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV CUDA_VISIBLE_DEVICES=0
 
-# Install system dependencies (Python + Node.js)
+# Install system dependencies (Python + Node.js + Caddy)
 RUN apt-get update && apt-get install -y \
     python3.10 python3-pip python3.10-venv \
     git ffmpeg libgl1 libglib2.0-0 curl \
+    debian-keyring debian-archive-keyring apt-transport-https \
+    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list \
+    && apt-get update \
+    && apt-get install -y caddy \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -64,14 +69,17 @@ ENV PYTHONPATH="/app/saas/backend:${PYTHONPATH}"
 RUN python3 -c "from models import init_db, seed_default_data; init_db(); seed_default_data()"
 
 # Create necessary directories
-RUN mkdir -p /app/uploads /app/data
+RUN mkdir -p /app/uploads /app/data /etc/caddy
 
 # Copy entrypoint
 COPY start-all.sh /app/start-all.sh
 RUN chmod +x /app/start-all.sh
 
-# Expose ports: SaaS (8000) + Engine (6967)
-EXPOSE 8000 6967
+# Copy Caddyfile
+COPY saas/Caddyfile /etc/caddy/Caddyfile
+
+# Expose ports: HTTPS (443) + HTTP (80) + Engine (6967)
+EXPOSE 80 443 6967
 
 # Health check on the SaaS API
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
@@ -80,6 +88,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # Default environment
 ENV PERSONA_ENGINE_URL=http://localhost:6967
 ENV PERSONA_DEVICE=cuda
+ENV DOMAIN=*
 
-# Run both engine + backend
+# Run Caddy + both engine + backend
 CMD ["/app/start-all.sh"]
