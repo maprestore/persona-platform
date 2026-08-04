@@ -3,10 +3,28 @@ import api from '../../api';
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get('/api/admin/dashboard').then(res => setStats(res.data));
+    api.get('/api/admin/dashboard')
+      .then(res => setStats(res.data))
+      .catch(err => {
+        console.error('Dashboard API error:', err);
+        setError(err.response?.data?.detail || 'Failed to load dashboard data');
+      });
   }, []);
+
+  if (error) return (
+    <div className="p-6">
+      <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-6">
+        <h2 className="text-red-400 text-lg font-semibold">Error Loading Dashboard</h2>
+        <p className="text-red-300 mt-2">{error}</p>
+        <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
+          Retry
+        </button>
+      </div>
+    </div>
+  );
 
   if (!stats) return <div className="p-6"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div></div>;
 
