@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 import uuid
@@ -107,6 +108,139 @@ class TuningRequest(BaseModel):
     edge_feathering: float = 0.3
     brightness_adapt: bool = True
     landmark_smoothing: bool = True
+
+
+class VideoRoom:
+    """Multi-party video call room with face-swap processing."""
+
+    def __init__(self, room_id: str, name: str, max_participants: int = 8):
+        self.room_id = room_id
+        self.name = name
+        self.max_participants = max_participants
+        self.created_at = time.time()
+        self.participants: dict[str, "RoomParticipant"] = {}
+        self._lock = threading.Lock()
+
+    def add_participant(self, participant: "RoomParticipant") -> bool:
+        with self._lock:
+            if len(self.participants) >= self.max_participants:
+                return False
+            self.participants[participant.user_id] = participant
+            return True
+
+    def remove_participant(self, user_id: str) -> None:
+        with self._lock:
+            self.participants.pop(user_id, None)
+
+    def get_participant_list(self) -> list[dict]:
+        with self._lock:
+            return [
+                {
+                    "user_id": p.user_id,
+                    "name": p.name,
+                    "muted": p.muted,
+                    "video_off": p.video_off,
+                    "joined_at": p.joined_at,
+                }
+                for p in self.participants.values()
+            ]
+
+    async def broadcast_frame(self, sender_id: str, frame_bytes: bytes, tracking: dict | None = None) -> None:
+        """Send processed frame to all participants except sender."""
+        with self._lock:
+            targets = [
+                p for uid, p in self.participants.items()
+                if uid != sender_id and p.ws is not None and not p.video_off
+            ]
+        for p in targets:
+            try:
+                await p.ws.send_bytes(frame_bytes)
+                if tracking:
+                    await p.ws.send_json({"tracking": tracking, "from": sender_id})
+            except Exception:
+                pass
+
+    async def broadcast_audio(self, sender_id: str, audio_bytes: bytes) -> None:
+        """Forward audio to all participants except sender."""
+        with self._lock:
+            targets = [
+                p for uid, p in self.participants.items()
+                if uid != sender_id and p.ws is not None and not p.muted
+            ]
+        for p in targets:
+            try:
+                await p.ws.send_bytes(audio_bytes)
+            except Exception:
+                pass
+
+    async def broadcast_system(self, message: dict, exclude: str | None = None) -> None:
+        """Send a JSON system message to all participants."""
+        with self._lock:
+            targets = [
+                p for uid, p in self.participants.items()
+                if uid != exclude and p.ws is not None
+            ]
+        for p in targets:
+            try:
+                await p.ws.send_json(message)
+            except Exception:
+                pass
+
+
+class RoomParticipant:
+    """A participant in a video room."""
+
+    def __init__(self, user_id: str, name: str, ws: WebSocket):
+        self.user_id = user_id
+        self.name = name
+        self.ws = ws
+        self.muted = False
+        self.video_off = False
+        self.joined_at = time.time()
+
+
+class RoomManager:
+    """Manages all active video rooms."""
+
+    def __init__(self):
+        self._rooms: dict[str, VideoRoom] = {}
+        self._lock = threading.Lock()
+
+    def create_room(self, name: str | None = None, max_participants: int = 8) -> VideoRoom:
+        room_id = uuid.uuid4().hex[:8]
+        with self._lock:
+            while room_id in self._rooms:
+                room_id = uuid.uuid4().hex[:8]
+            room = VideoRoom(room_id, name or f"Room {room_id}", max_participants)
+            self._rooms[room_id] = room
+        return room
+
+    def get_room(self, room_id: str) -> VideoRoom | None:
+        with self._lock:
+            return self._rooms.get(room_id)
+
+    def delete_room(self, room_id: str) -> bool:
+        with self._lock:
+            if room_id in self._rooms:
+                del self._rooms[room_id]
+                return True
+            return False
+
+    def list_rooms(self) -> list[dict]:
+        with self._lock:
+            return [
+                {
+                    "room_id": r.room_id,
+                    "name": r.name,
+                    "participants": len(r.participants),
+                    "max_participants": r.max_participants,
+                    "created_at": r.created_at,
+                }
+                for r in self._rooms.values()
+            ]
+
+
+_room_manager = RoomManager()
 
 
 class EngineState:
@@ -1158,6 +1292,173 @@ def create_app() -> FastAPI:
     @app.get("/virtual-cam/status")
     async def virtual_cam_status():
         return _engine_state.get_virtual_cam_status()
+
+    # ── Video Call Rooms ─────────────────────────────────────────────────
+
+    @app.post("/rooms")
+    async def create_room(
+        name: str = Form(default=""),
+        max_participants: int = Form(default=8),
+    ):
+        room = _room_manager.create_room(name=name or None, max_participants=max_participants)
+        return {
+            "room_id": room.room_id,
+            "name": room.name,
+            "max_participants": room.max_participants,
+        }
+
+    @app.get("/rooms")
+    async def list_rooms():
+        return {"rooms": _room_manager.list_rooms()}
+
+    @app.get("/rooms/{room_id}")
+    async def get_room(room_id: str):
+        room = _room_manager.get_room(room_id)
+        if not room:
+            raise HTTPException(status_code=404, detail="Room not found")
+        return {
+            "room_id": room.room_id,
+            "name": room.name,
+            "participants": room.get_participant_list(),
+            "max_participants": room.max_participants,
+        }
+
+    @app.delete("/rooms/{room_id}")
+    async def delete_room(room_id: str):
+        if not _room_manager.delete_room(room_id):
+            raise HTTPException(status_code=404, detail="Room not found")
+        return {"status": "deleted"}
+
+    @app.websocket("/room/{room_id}/stream")
+    async def room_stream(ws: WebSocket, room_id: str):
+        """Multi-party video call WebSocket.
+
+        Protocol:
+        - First message (JSON): {"user_id": "...", "name": "..."}
+        - Then binary messages: JPEG video frames (processed and forwarded to room)
+        - JSON messages: {"type": "audio", "data": base64} for audio forwarding
+        - JSON messages: {"type": "control", "muted": bool, "video_off": bool}
+        - Server sends: binary JPEG frames from other participants
+        - Server sends: JSON {"type": "participant_joined", ...} / {"type": "participant_left", ...}
+        - Server sends: JSON {"tracking": ..., "from": "..."} for tracking data
+        """
+        await ws.accept()
+        room = _room_manager.get_room(room_id)
+        if not room:
+            await ws.send_json({"error": "Room not found"})
+            await ws.close(code=4004, reason="Room not found")
+            return
+
+        user_id = None
+        try:
+            # Wait for join message
+            join_msg = await ws.receive_json()
+            user_id = join_msg.get("user_id", uuid.uuid4().hex[:12])
+            user_name = join_msg.get("name", f"User {user_id[:6]}")
+
+            participant = RoomParticipant(user_id, user_name, ws)
+            if not room.add_participant(participant):
+                await ws.send_json({"error": "Room is full"})
+                await ws.close(code=4003, reason="Room full")
+                return
+
+            # Notify others
+            await room.broadcast_system(
+                {"type": "participant_joined", "user_id": user_id, "name": user_name},
+                exclude=user_id,
+            )
+
+            # Send current participant list to new user
+            await ws.send_json({
+                "type": "room_info",
+                "room_id": room_id,
+                "participants": room.get_participant_list(),
+            })
+
+            logger.info(f"User {user_name} ({user_id}) joined room {room_id}")
+
+            engine = _engine_state.get_engine()
+            min_frame_interval = 1.0 / 30.0
+
+            while True:
+                data = await ws.receive()
+                now = time.monotonic()
+
+                if "bytes" in data:
+                    # Video frame from participant
+                    frame_bytes = data["bytes"]
+                    arr = np.frombuffer(frame_bytes, dtype=np.uint8)
+                    try:
+                        import cv2
+                        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                        if img is not None:
+                            from shared.types import VideoFrame
+                            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+                            if engine.has_source():
+                                tracking_result = engine.process_frame_with_tracking(img_rgb)
+                                tracked_frame = tracking_result["frame"]
+                                target_frame = VideoFrame(image=tracked_frame)
+                                source_frame = VideoFrame(image=np.zeros_like(img_rgb))
+                                result = engine.swap(source_frame, target_frame)
+                                _engine_state.send_virtual_cam(result.image)
+                                _, buf = cv2.imencode(".jpg", result.image)
+                                await room.broadcast_frame(user_id, buf.tobytes(), tracking_result.get("tracking"))
+                            else:
+                                _, buf = cv2.imencode(".jpg", img_rgb)
+                                await room.broadcast_frame(user_id, buf.tobytes())
+                    except ImportError:
+                        await ws.send_json({"error": "opencv unavailable"})
+                    except Exception as e:
+                        logger.exception("Frame processing failed in room")
+
+                elif "text" in data:
+                    try:
+                        msg = json.loads(data["text"])
+                        msg_type = msg.get("type", "")
+
+                        if msg_type == "audio":
+                            # Audio forwarding (base64 encoded)
+                            import base64
+                            audio_data = base64.b64decode(msg.get("data", ""))
+                            if audio_data:
+                                await room.broadcast_audio(user_id, audio_data)
+
+                        elif msg_type == "control":
+                            participant.muted = msg.get("muted", participant.muted)
+                            participant.video_off = msg.get("video_off", participant.video_off)
+                            await room.broadcast_system(
+                                {"type": "participant_updated", "user_id": user_id, "muted": participant.muted, "video_off": participant.video_off},
+                                exclude=user_id,
+                            )
+
+                        elif msg_type == "chat":
+                            await room.broadcast_system(
+                                {"type": "chat", "from": user_id, "name": user_name, "message": msg.get("message", "")},
+                            )
+
+                    except json.JSONDecodeError:
+                        pass
+
+                elapsed = time.monotonic() - now
+                if elapsed < min_frame_interval:
+                    await asyncio.sleep(min_frame_interval - elapsed)
+
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:
+            logger.exception(f"Room WebSocket error: {exc}")
+        finally:
+            if user_id:
+                room.remove_participant(user_id)
+                await room.broadcast_system(
+                    {"type": "participant_left", "user_id": user_id},
+                )
+                logger.info(f"User {user_id} left room {room_id}")
+                # Delete room if empty
+                if not room.participants:
+                    _room_manager.delete_room(room_id)
+                    logger.info(f"Room {room_id} deleted (empty)")
 
     @app.post("/swap", response_model=SwapResponse)
     async def swap(req: SwapRequest) -> SwapResponse:
