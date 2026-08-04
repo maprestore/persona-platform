@@ -43,7 +43,9 @@ RUN pip install packages/shared && \
         insightface onnxruntime-gpu \
         gfpgan mediapipe rembg \
         pydub torchcrepe whisper soundfile \
-        pyvirtualcam numpy typing-extensions
+        pyvirtualcam numpy typing-extensions \
+        imageio imageio-ffmpeg \
+        scikit-image filterpy
 
 # Install PyTorch with CUDA support
 RUN pip uninstall -y torch torchvision 2>/dev/null; \
