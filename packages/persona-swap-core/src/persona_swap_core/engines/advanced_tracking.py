@@ -2,7 +2,7 @@
 Advanced Tracking Engine
 ========================
 Real-time head pose, facial expression, hand tracking, and lip sync.
-Uses InsightFace landmarks, MediaPipe Hands, and custom expression transfer.
+Uses InsightFace landmarks, MediaPipe Hands, Kalman filtering, and custom expression transfer.
 """
 
 from __future__ import annotations
@@ -16,6 +16,14 @@ import numpy as np
 import numpy.typing as npt
 
 logger = logging.getLogger(__name__)
+
+# Try to import filterpy for Kalman filtering
+try:
+    from filterpy.kalman import KalmanFilter
+    HAS_FILTERPY = True
+except ImportError:
+    HAS_FILTERPY = False
+    logger.info("filterpy not available, using EMA smoothing")
 
 
 @dataclass
@@ -77,7 +85,12 @@ class AdvancedTrackingEngine:
         self._frame_count = 0
         self._prev_head_pose: Optional[HeadPose] = None
         self._prev_expression: Optional[FacialExpression] = None
-        self._smoothing_factor = 0.7  # Temporal smoothing
+        self._smoothing_factor = 0.7  # EMA fallback smoothing
+
+        # Kalman filters for temporal consistency
+        self._kf_head_pose: Optional[object] = None
+        self._kf_expression: Optional[object] = None
+        self._kalman_initialized = False
 
         # 3D model points for head pose estimation (average face model)
         self._model_points = np.array([
@@ -95,10 +108,35 @@ class AdvancedTrackingEngine:
         try:
             self._init_face_detector()
             self._init_hand_detector()
+            self._init_kalman_filters()
             self._loaded = True
         except Exception as e:
             logger.warning("AdvancedTracking load warning: %s", e)
             self._loaded = True  # Still usable with limited features
+
+    def _init_kalman_filters(self) -> None:
+        """Initialize Kalman filters for head pose and expression smoothing."""
+        if not HAS_FILTERPY:
+            return
+
+        # Head pose Kalman filter: [pitch, yaw, roll, pos_x, pos_y]
+        self._kf_head_pose = KalmanFilter(dim_x=5, dim_z=5)
+        self._kf_head_pose.F = np.eye(5)  # State transition
+        self._kf_head_pose.H = np.eye(5)  # Measurement
+        self._kf_head_pose.P *= 1000.0    # Covariance
+        self._kf_head_pose.R = np.eye(5) * 0.1   # Measurement noise
+        self._kf_head_pose.Q = np.eye(5) * 0.01  # Process noise
+
+        # Expression Kalman filter: [mouth_open, smile, eyebrow, eye_L, eye_R]
+        self._kf_expression = KalmanFilter(dim_x=5, dim_z=5)
+        self._kf_expression.F = np.eye(5)
+        self._kf_expression.H = np.eye(5)
+        self._kf_expression.P *= 1000.0
+        self._kf_expression.R = np.eye(5) * 0.1
+        self._kf_expression.Q = np.eye(5) * 0.01
+
+        self._kalman_initialized = True
+        logger.info("Kalman filters initialized for temporal smoothing")
 
     def _init_face_detector(self) -> None:
         """Initialize face detector with InsightFace."""
@@ -473,7 +511,27 @@ class AdvancedTrackingEngine:
         current: HeadPose,
         previous: HeadPose,
     ) -> HeadPose:
-        """Apply temporal smoothing to head pose."""
+        """Apply temporal smoothing to head pose using Kalman filter or EMA."""
+        if self._kalman_initialized and self._kf_head_pose is not None:
+            try:
+                z = np.array([
+                    current.pitch, current.yaw, current.roll,
+                    current.position[0], current.position[1],
+                ], dtype=np.float64)
+                self._kf_head_pose.predict()
+                self._kf_head_pose.update(z)
+                x = self._kf_head_pose.x.flatten()
+                return HeadPose(
+                    pitch=float(x[0]),
+                    yaw=float(x[1]),
+                    roll=float(x[2]),
+                    position=(float(x[3]), float(x[4])),
+                    confidence=current.confidence,
+                )
+            except Exception:
+                pass
+
+        # Fallback to EMA
         alpha = self._smoothing_factor
         smoothed = HeadPose(
             pitch=current.pitch * alpha + previous.pitch * (1 - alpha),
@@ -492,7 +550,28 @@ class AdvancedTrackingEngine:
         current: FacialExpression,
         previous: FacialExpression,
     ) -> FacialExpression:
-        """Apply temporal smoothing to expression."""
+        """Apply temporal smoothing to expression using Kalman filter or EMA."""
+        if self._kalman_initialized and self._kf_expression is not None:
+            try:
+                z = np.array([
+                    current.mouth_open, current.mouth_smile, current.eyebrow_raise,
+                    current.eye_open_left, current.eye_open_right,
+                ], dtype=np.float64)
+                self._kf_expression.predict()
+                self._kf_expression.update(z)
+                x = self._kf_expression.x.flatten()
+                return FacialExpression(
+                    mouth_open=float(x[0]),
+                    mouth_smile=float(x[1]),
+                    eyebrow_raise=float(x[2]),
+                    eye_open_left=float(x[3]),
+                    eye_open_right=float(x[4]),
+                    gaze=current.gaze,
+                )
+            except Exception:
+                pass
+
+        # Fallback to EMA
         alpha = self._smoothing_factor
         return FacialExpression(
             mouth_open=current.mouth_open * alpha + previous.mouth_open * (1 - alpha),
@@ -627,4 +706,7 @@ class AdvancedTrackingEngine:
             self._hand_detector.close()
             self._hand_detector = None
         self._face_detector = None
+        self._kf_head_pose = None
+        self._kf_expression = None
+        self._kalman_initialized = False
         self._loaded = False

@@ -145,17 +145,59 @@ class FaceSwapEngine:
         target_frames: list[npt.NDArray[np.uint8]],
         tuning: TuningParams | None = None,
         use_watermark: bool = False,
+        temporal_blend: float = 0.15,
     ) -> list[npt.NDArray[np.uint8]]:
+        """
+        Swap faces in video frames with temporal consistency.
+        
+        Args:
+            source_img: Source face image
+            target_frames: List of target video frames
+            tuning: Tuning parameters
+            use_watermark: Whether to add watermark
+            temporal_blend: Blending factor with previous frame (0=off, 0.3=max)
+        """
         source_faces = self.detect(source_img)
         if not source_faces:
             return target_frames
 
         results = []
+        prev_result = None
         for frame in target_frames:
             result = self.swap(source_img, frame, source_faces, tuning)
             if use_watermark:
                 from ..watermark import add_watermark
                 result = add_watermark(result)
+
+            # Temporal consistency: blend with previous frame
+            if prev_result is not None and temporal_blend > 0:
+                try:
+                    import cv2
+                    # Create face mask from current detection
+                    target_faces = self.detect(frame)
+                    if target_faces:
+                        bbox = target_faces[0]["bbox"]
+                        x1, y1, x2, y2 = [int(v) for v in bbox]
+                        h, w = frame.shape[:2]
+                        x1, y1 = max(0, x1), max(0, y1)
+                        x2, y2 = min(w, x2), min(h, y2)
+                        
+                        if x2 > x1 and y2 > y1:
+                            # Create soft mask for face region
+                            mask = np.zeros((h, w), dtype=np.float32)
+                            cv2.rectangle(mask, (x1, y1), (x2, y2), 1.0, -1)
+                            kernel_size = max(3, int((x2 - x1) * 0.3))
+                            if kernel_size % 2 == 0:
+                                kernel_size += 1
+                            mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
+                            mask_3ch = np.stack([mask] * 3, axis=-1)
+                            
+                            # Blend only the face region with previous result
+                            result = (result * mask_3ch + prev_result * (1 - mask_3ch)).astype(np.uint8)
+                except Exception:
+                    pass  # Skip blending on error
+
+            prev_result = result.copy()
             results.append(result)
 
         return results

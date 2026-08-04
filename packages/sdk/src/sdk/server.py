@@ -1534,7 +1534,6 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=400, detail="Cannot read source image")
             source_img = cv2.cvtColor(source_bgr, cv2.COLOR_BGR2RGB)
             cap = cv2.VideoCapture(str(target_path))
-            out = None
             if not cap.isOpened():
                 raise HTTPException(status_code=400, detail="Cannot open target video")
 
@@ -1547,26 +1546,85 @@ def create_app() -> FastAPI:
 
             output_id = f"swap_vid_{uuid.uuid4().hex[:12]}.mp4"
             output_path = _safe_storage_path(OUTPUT_DIR, output_id)
-            out = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-            if not out.isOpened():
-                raise MediaProcessingError("cannot create output video")
+            temp_frames_dir = OUTPUT_DIR / f"_temp_frames_{uuid.uuid4().hex[:8]}"
+            temp_frames_dir.mkdir(parents=True, exist_ok=True)
 
             engine = _engine_state.get_engine()
             from shared.types import VideoFrame
             source_frame = VideoFrame(image=source_img)
             frames_processed = 0
+            frame_idx = 0
+
             while True:
                 ret, frame_bgr = cap.read()
                 if not ret:
                     break
                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                 result_frame = engine.swap_with_options(source_frame, VideoFrame(image=frame_rgb))
-                out.write(cv2.cvtColor(result_frame.image, cv2.COLOR_RGB2BGR))
+                # Save frame as PNG for lossless encoding
+                frame_path = temp_frames_dir / f"frame_{frame_idx:06d}.png"
+                cv2.imwrite(str(frame_path), cv2.cvtColor(result_frame.image, cv2.COLOR_RGB2BGR))
                 frames_processed += 1
+                frame_idx += 1
+
+            cap.release()
+
             if frames_processed == 0:
                 raise MediaProcessingError("target video contained no readable frames")
-            out.release()
-            out = None
+
+            # Use ffmpeg to encode frames + preserve audio from original
+            try:
+                import subprocess
+                # Encode frames to video with ffmpeg
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    "-framerate", str(fps),
+                    "-i", str(temp_frames_dir / "frame_%06d.png"),
+                    "-i", str(target_path),  # Second input for audio
+                    "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                    "-c:a", "aac", "-b:a", "128k",
+                    "-map", "0:v:0",  # Video from frames
+                    "-map", "1:a:0?",  # Audio from original (if exists)
+                    "-shortest",
+                    "-movflags", "+faststart",
+                    str(output_path),
+                ]
+                result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
+                if result.returncode != 0:
+                    # Fallback: encode without audio
+                    ffmpeg_cmd_fallback = [
+                        "ffmpeg", "-y",
+                        "-framerate", str(fps),
+                        "-i", str(temp_frames_dir / "frame_%06d.png"),
+                        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                        "-pix_fmt", "yuv420p",
+                        "-movflags", "+faststart",
+                        str(output_path),
+                    ]
+                    subprocess.run(ffmpeg_cmd_fallback, capture_output=True, timeout=300, check=True)
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                # Fallback to imageio if ffmpeg subprocess fails
+                try:
+                    import imageio.v3 as iio
+                    frames = []
+                    for i in range(frames_processed):
+                        frame_path = temp_frames_dir / f"frame_{i:06d}.png"
+                        frames.append(iio.imread(str(frame_path)))
+                    iio.imwrite(str(output_path), np.array(frames), fps=fps, codec="libx264")
+                except Exception:
+                    # Final fallback: cv2.VideoWriter
+                    out = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+                    for i in range(frames_processed):
+                        frame_path = temp_frames_dir / f"frame_{i:06d}.png"
+                        frame = cv2.imread(str(frame_path))
+                        if frame is not None:
+                            out.write(frame)
+                    out.release()
+            finally:
+                # Cleanup temp frames
+                import shutil
+                shutil.rmtree(temp_frames_dir, ignore_errors=True)
+
             _check_write(True, output_path)
 
             return {
@@ -1579,11 +1637,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail="opencv-python not installed")
         except Exception as exc:
             raise _http_error(exc)
-        finally:
-            if "cap" in locals() and cap is not None:
-                cap.release()
-            if "out" in locals() and out is not None:
-                out.release()
 
     @app.post("/live-portrait")
     async def live_portrait(req: LivePortraitRequest):
