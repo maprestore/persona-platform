@@ -28,16 +28,7 @@ COPY packages/ packages/
 RUN pip install packages/shared && \
     pip install --no-deps packages/persona-swap-core && \
     pip install --no-deps packages/magiclip && \
-    pip install --no-deps packages/sdk && \
-    pip install \
-        opencv-python pillow librosa scipy \
-        fastapi uvicorn websockets python-multipart httpx \
-        insightface onnxruntime-gpu \
-        gfpgan mediapipe rembg \
-        pydub torchcrepe whisper soundfile \
-        pyvirtualcam numpy typing-extensions \
-        imageio imageio-ffmpeg \
-        scikit-image filterpy
+    pip install --no-deps packages/sdk
 
 RUN pip uninstall -y torch torchvision 2>/dev/null; \
     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
