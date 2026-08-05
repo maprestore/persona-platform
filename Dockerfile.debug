@@ -1,5 +1,0 @@
-FROM timmydon/persona-studio:latest
-COPY debug-start.sh /app/debug-start.sh
-RUN chmod +x /app/debug-start.sh
-EXPOSE 80 8000 6967
-CMD ["/app/debug-start.sh"]
