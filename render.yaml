@@ -1,22 +1,21 @@
 services:
   - type: web
     name: persona-studio
+    runtime: docker
+    dockerfilePath: ./saas/Dockerfile
+    dockerContext: .
     region: oregon
     plan: free
-    env: docker
-    build:
-      dockerfilePath: saas/Dockerfile
-      context: .
     # Only run the SaaS web backend on Render's CPU/free tier.
     # (The GPU persona engine is not started here; engine endpoints
     #  return a graceful 503 "engine unavailable" instead of raw errors.)
-    startCommand: uvicorn saas.backend.main:app --host 0.0.0.0 --port $PORT
+    dockerCommand: uvicorn saas.backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
-      - key: JWT_SECRET
-        value: f016717751e27f79a33f0ae5a200b5ed019ebf44b48829af76377bd79595a2a8
       - key: DOMAIN
         value: "*"
+      - key: JWT_SECRET
+        generateValue: true
       - key: PERSONA_ENGINE_URL
         value: http://localhost:6967
       - key: PERSONA_DEVICE
