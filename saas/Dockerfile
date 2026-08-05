@@ -8,6 +8,7 @@ ENV CUDA_VISIBLE_DEVICES=0
 RUN apt-get update && apt-get install -y \
     python3.10 python3-pip python3.10-venv \
     git ffmpeg libgl1 libglib2.0-0 curl \
+    openssh-server \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -47,7 +48,7 @@ RUN mkdir -p /app/uploads /app/data
 COPY start-all.sh /app/start-all.sh
 RUN chmod +x /app/start-all.sh
 
-EXPOSE 8000 6967
+EXPOSE 8000 6967 22 9999
 
 ENV PERSONA_ENGINE_URL=http://localhost:6967
 ENV PERSONA_DEVICE=cuda
