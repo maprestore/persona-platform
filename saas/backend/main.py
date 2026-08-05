@@ -77,6 +77,22 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(httpx.RequestError)
+async def engine_unavailable_handler(request: Request, exc: httpx.RequestError):
+    try:
+        url = str(exc.request.url)
+    except Exception:
+        url = ""
+    engine_host = ENGINE_URL.split("//", 1)[-1]
+    if "6967" in url or engine_host in url:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Persona GPU engine is unavailable on this deployment. "
+                               "Face, voice, and video features require a GPU instance "
+                               "(e.g. vast.ai RTX 4090). This web UI runs in CPU/free-tier mode."},
+        )
+
+
 @app.on_event("startup")
 def startup():
     init_db()
