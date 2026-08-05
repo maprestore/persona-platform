@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 echo "========================================"
 echo "   Persona Studio - Full Stack"
@@ -13,7 +12,19 @@ LOG="/app/logs/startup.log"
 mkdir -p /app/logs
 
 # Start SSH daemon for remote access
-echo "[0/3] Starting SSH daemon..."
+echo "[0/4] Starting SSH daemon..."
+mkdir -p /root/.ssh
+if [ -n "$SSH_PUBKEY" ]; then
+    echo "$SSH_PUBKEY" >> /root/.ssh/authorized_keys
+    chmod 700 /root/.ssh
+    chmod 600 /root/.ssh/authorized_keys
+    echo "  SSH key added to authorized_keys"
+elif [ -n "$ssh_pubkey" ]; then
+    echo "$ssh_pubkey" >> /root/.ssh/authorized_keys
+    chmod 700 /root/.ssh
+    chmod 600 /root/.ssh/authorized_keys
+    echo "  SSH key added to authorized_keys"
+fi
 mkdir -p /run/sshd
 /usr/sbin/sshd 2>/dev/null || echo "WARNING: sshd not available, skipping"
 
