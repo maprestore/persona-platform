@@ -48,7 +48,7 @@ RUN mkdir -p /app/uploads /app/data
 COPY start-all.sh /app/start-all.sh
 RUN chmod +x /app/start-all.sh
 
-EXPOSE 8000 6967 22 9999
+EXPOSE 80 443 6967 22 9999
 
 ENV PERSONA_ENGINE_URL=http://localhost:6967
 ENV PERSONA_DEVICE=cuda

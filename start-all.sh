@@ -5,39 +5,34 @@ echo "   Persona Studio - Full Stack"
 echo "========================================"
 
 ENGINE_PORT="${ENGINE_PORT:-6967}"
-SAAS_PORT="${SAAS_PORT:-8000}"
+SAAS_PORT="${SAAS_PORT:-80}"
 WORKDIR="${WORKDIR:-/app}"
 LOG="/app/logs/startup.log"
 
 mkdir -p /app/logs
 
-# Start SSH daemon for remote access
+# Start SSH daemon for remote access  
 echo "[0/4] Starting SSH daemon..."
-mkdir -p /root/.ssh
+mkdir -p /root/.ssh /run/sshd
 if [ -n "$SSH_PUBKEY" ]; then
     echo "$SSH_PUBKEY" >> /root/.ssh/authorized_keys
     chmod 700 /root/.ssh
     chmod 600 /root/.ssh/authorized_keys
     echo "  SSH key added to authorized_keys"
-elif [ -n "$ssh_pubkey" ]; then
-    echo "$ssh_pubkey" >> /root/.ssh/authorized_keys
-    chmod 700 /root/.ssh
-    chmod 600 /root/.ssh/authorized_keys
-    echo "  SSH key added to authorized_keys"
 fi
-mkdir -p /run/sshd
-/usr/sbin/sshd 2>/dev/null || echo "WARNING: sshd not available, skipping"
+/usr/sbin/sshd 2>/dev/null || echo "  WARNING: sshd not available, skipping"
 
 cleanup() {
     echo ""
     echo "Shutting down..."
     [ -n "$ENGINE_PID" ] && kill $ENGINE_PID 2>/dev/null
     [ -n "$SAAS_PID" ] && kill $SAAS_PID 2>/dev/null
+    [ -n "$LOG_PID" ] && kill $LOG_PID 2>/dev/null
     echo "Done."
 }
 trap cleanup EXIT INT TERM
 
-echo "[1/3] Starting persona engine on port $ENGINE_PORT..."
+echo "[1/4] Starting persona engine on port $ENGINE_PORT..."
 cd "$WORKDIR"
 python3 run_persona.py --port "$ENGINE_PORT" --skip-install >> "$LOG" 2>&1 &
 ENGINE_PID=$!
@@ -60,9 +55,9 @@ for i in $(seq 1 180); do
     sleep 1
 done
 
-echo "[2/3] Starting SaaS backend on port $SAAS_PORT..."
+echo "[2/4] Starting SaaS backend on port $SAAS_PORT..."
 cd "$WORKDIR"
-python3 -m uvicorn saas.backend.main:app \
+PYTHONPATH="/app/saas/backend:${PYTHONPATH}" python3 -m uvicorn saas.backend.main:app \
     --host 0.0.0.0 \
     --port "$SAAS_PORT" \
     --log-level info >> "$LOG" 2>&1 &
@@ -81,17 +76,19 @@ for i in $(seq 1 60); do
     sleep 2
 done
 
-echo "[3/3] Serving logs on port 9999..."
+echo "[3/4] Starting log server on port 9999..."
 cd /app/logs
 python3 -m http.server 9999 >> "$LOG" 2>&1 &
 LOG_PID=$!
 echo "  Log server PID: $LOG_PID"
 
+echo "[4/4] Keeping container alive..."
 echo "========================================"
-echo "All services started!"
-echo "Frontend: http://$(curl -s ifconfig.me):$SAAS_PORT"
-echo "Engine:   http://$(curl -s ifconfig.me):$ENGINE_PORT"
-echo "Logs:     http://$(curl -s ifconfig.me):9999/startup.log"
+echo "Services:"
+echo "  Frontend: http://$(curl -s ifconfig.me)"
+echo "  Engine:   http://$(curl -s ifconfig.me):$ENGINE_PORT"
+echo "  Logs:     http://$(curl -s ifconfig.me):9999/startup.log"
+echo "  SSH:      via Vast.ai gateway"
 echo "========================================"
 
 wait $SAAS_PID $ENGINE_PID $LOG_PID 2>/dev/null
