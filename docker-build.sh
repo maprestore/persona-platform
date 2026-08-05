@@ -19,7 +19,7 @@ echo ""
 cd "$(dirname "$0")"
 
 echo "[1/2] Building Docker image..."
-docker build -t "$IMAGE" -f saas/Dockerfile .
+docker build -t "$IMAGE" -f Dockerfile .
 
 echo ""
 echo "[2/2] Pushing to Docker Hub..."

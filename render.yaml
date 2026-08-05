@@ -2,8 +2,6 @@ services:
   - type: web
     name: persona-studio
     runtime: docker
-    dockerfilePath: ./saas/Dockerfile
-    dockerContext: .
     region: oregon
     plan: free
     # Only run the SaaS web backend on Render's CPU/free tier.

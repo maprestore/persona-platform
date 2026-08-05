@@ -4,7 +4,7 @@ services:
   persona-studio:
     build:
       context: ..
-      dockerfile: saas/Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "80:80"
       - "443:443"
