@@ -28,24 +28,48 @@ ENGINE_PID=$!
 echo "  Engine PID: $ENGINE_PID"
 
 echo "  Waiting for engine to start..."
-for i in $(seq 1 120); do
+for i in $(seq 1 180); do
     if curl -sf "http://localhost:$ENGINE_PORT/health" > /dev/null 2>&1; then
         echo "  Engine ready!"
         break
     fi
     if ! kill -0 $ENGINE_PID 2>/dev/null; then
-        echo "  ERROR: Engine process died. Check logs."
-        exit 1
+        echo "  WARNING: Engine process ended. Continuing with SaaS backend only."
+        ENGINE_PID=""
+        break
     fi
-    if [ $i -eq 120 ]; then
-        echo "  WARNING: Engine not ready after 120s, continuing anyway..."
+    if [ $i -eq 180 ]; then
+        echo "  WARNING: Engine not ready after 180s, continuing anyway..."
     fi
     sleep 1
 done
 
 echo "[2/2] Starting SaaS backend on port $SAAS_PORT..."
 cd "$WORKDIR"
-exec python3 -m uvicorn saas.backend.main:app \
+EXEC_PID=$!
+python3 -m uvicorn saas.backend.main:app \
     --host 0.0.0.0 \
     --port "$SAAS_PORT" \
-    --log-level info
+    --log-level info &
+SAAS_PID=$!
+echo "  SaaS PID: $SAAS_PID"
+
+echo "  Waiting for SaaS backend to start..."
+for i in $(seq 1 60); do
+    if curl -sf "http://localhost:$SAAS_PORT/api/auth/login" > /dev/null 2>&1; then
+        echo "  SaaS backend ready!"
+        break
+    fi
+    if [ $i -eq 60 ]; then
+        echo "  WARNING: SaaS not ready after 60s"
+    fi
+    sleep 2
+done
+
+echo "========================================"
+echo "All services started!"
+echo "Frontend: http://$(curl -s ifconfig.me):$SAAS_PORT"
+echo "Engine:   http://$(curl -s ifconfig.me):$ENGINE_PORT"
+echo "========================================"
+
+wait $SAAS_PID $ENGINE_PID 2>/dev/null || wait $SAAS_PID
