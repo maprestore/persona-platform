@@ -41,7 +41,13 @@ class FaceSwapEngine:
                 else ["CPUExecutionProvider"]
             )
             root = os.path.join(os.path.expanduser("~"), ".insightface", "models")
-            self._detector = FaceAnalysis(name="buffalo_1", root=root, download=False, providers=providers)
+            # Try buffalo_l (current name on GitHub); fall back to buffalo_1 for older images
+            model_name = "buffalo_l"
+            try:
+                self._detector = FaceAnalysis(name=model_name, root=root, download=True, providers=providers)
+            except Exception:
+                model_name = "buffalo_1"
+                self._detector = FaceAnalysis(name=model_name, root=root, download=True, providers=providers)
             self._detector.prepare(ctx_id=0 if device == "cuda" else -1)
 
             swapper_path = os.path.join(root, "inswapper_128.onnx")

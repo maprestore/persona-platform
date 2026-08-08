@@ -31,8 +31,14 @@ RUN pip install packages/shared && \
     pip install --no-deps packages/magiclip && \
     pip install --no-deps packages/sdk
 
-RUN pip uninstall -y torch torchvision 2>/dev/null; \
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+RUN pip uninstall -y torch torchaudio torchvision 2>/dev/null; \
+    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu124 && \
+    python3 -c "import torch; print('torch', torch.__version__)" && \
+    python3 -c "import torchaudio; print('torchaudio', torchaudio.__version__)" && \
+    python3 -c "import onnxruntime; print('onnxruntime', onnxruntime.__version__)" && \
+    python3 -c "from insightface.app import FaceAnalysis; fa=FaceAnalysis(name='buffalo_l', download=True); fa.prepare(ctx_id=-1); print('insightface models ready')" && \
+    python3 -c "import insightface; m=insightface.model_zoo.get_model('inswapper_128.onnx', download=True); print('inswapper model ready')" && \
+    curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
 
 COPY saas/ saas/
 
@@ -45,8 +51,8 @@ RUN python3 -c "from models import init_db, seed_default_data; init_db(); seed_d
 
 RUN mkdir -p /app/uploads /app/data
 
-COPY start-all.sh /app/start-all.sh
-RUN chmod +x /app/start-all.sh
+COPY start-all.sh run_persona.py /app/
+RUN chmod +x /app/start-all.sh /app/run_persona.py
 
 EXPOSE 80 443 6967 22 9999
 

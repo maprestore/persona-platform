@@ -44,9 +44,11 @@ import json
 
 # Config
 ENGINE_URL = os.getenv("PERSONA_ENGINE_URL", "http://localhost:6967")
+ENGINE_PORT = int(ENGINE_URL.rsplit(":", 1)[-1].rstrip("/")) if ":" in ENGINE_URL else 6967
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+_engine_restart_lock = False
 
 
 # App setup
@@ -85,11 +87,31 @@ async def engine_unavailable_handler(request: Request, exc: httpx.RequestError):
         url = ""
     engine_host = ENGINE_URL.split("//", 1)[-1]
     if "6967" in url or engine_host in url:
+        # Auto-restart engine on connection failure
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", f"run_persona.py.*--port.*{ENGINE_PORT}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if not result.stdout.strip():
+                workdir = Path("/app") if Path("/app").exists() else Path(__file__).parent.parent.parent
+                subprocess.Popen(
+                    ["python3", "run_persona.py", "--port", str(ENGINE_PORT), "--skip-install"],
+                    cwd=str(workdir),
+                    stdout=open("/app/logs/engine.log", "a"),
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+        except Exception:
+            pass
         return JSONResponse(
             status_code=503,
-            content={"detail": "Persona GPU engine is unavailable on this deployment. "
-                               "Face, voice, and video features require a GPU instance "
-                               "(e.g. vast.ai RTX 4090). This web UI runs in CPU/free-tier mode."},
+            content={
+                "detail": "GPU engine is starting up. Please retry in 10-30 seconds.",
+                "engine_url": ENGINE_URL,
+                "retry_after": 15,
+            },
         )
 
 
@@ -97,6 +119,45 @@ async def engine_unavailable_handler(request: Request, exc: httpx.RequestError):
 def startup():
     init_db()
     seed_default_data()
+    # Start background engine health monitor
+    import threading
+    def _engine_watchdog():
+        import time as _time, subprocess, signal
+        while True:
+            _time.sleep(45)
+            try:
+                import urllib.request
+                req = urllib.request.Request(f"{ENGINE_URL}/health")
+                urllib.request.urlopen(req, timeout=5)
+            except Exception:
+                # Engine is down, try to restart
+                try:
+                    result = subprocess.run(
+                        ["pgrep", "-f", f"run_persona.py.*--port.*{ENGINE_PORT}"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.stdout.strip():
+                        for pid in result.stdout.strip().split("\n"):
+                            try:
+                                os.kill(int(pid), signal.SIGTERM)
+                            except (ProcessLookupError, ValueError):
+                                pass
+                        _time.sleep(3)
+                except Exception:
+                    pass
+                workdir = Path("/app") if Path("/app").exists() else Path(__file__).parent.parent.parent
+                try:
+                    subprocess.Popen(
+                        ["python3", "run_persona.py", "--port", str(ENGINE_PORT), "--skip-install"],
+                        cwd=str(workdir),
+                        stdout=open("/app/logs/engine.log", "a"),
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                except Exception:
+                    pass
+    t = threading.Thread(target=_engine_watchdog, daemon=True)
+    t.start()
 
 
 # ─── Pydantic Models ────────────────────────────────────────────────────────
@@ -498,6 +559,20 @@ def get_pricing(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/engine/status")
+async def engine_status_public():
+    """Public endpoint to check engine status without auth."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ENGINE_URL}/health")
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"status": "online", "engine_url": ENGINE_URL, "details": data}
+    except Exception:
+        pass
+    return {"status": "offline", "engine_url": ENGINE_URL, "message": "GPU engine is starting up. Please retry in a moment."}
+
+
 # ─── Face Swap (Protected) ──────────────────────────────────────────────────
 
 @app.post("/api/swap")
@@ -543,103 +618,135 @@ async def swap_faces(
 
     error_message = None
 
-    # Forward to persona engine
-    try:
-        source_path = UPLOAD_DIR / f"{req.source_id}"
-        target_path = UPLOAD_DIR / f"{req.target_id}"
+    # Forward to persona engine (with auto-retry if engine is starting up)
+    import time as _time
+    max_retries = 3
+    for _attempt in range(max_retries):
+        try:
+            source_path = UPLOAD_DIR / f"{req.source_id}"
+            target_path = UPLOAD_DIR / f"{req.target_id}"
 
-        # Find actual files with extensions
-        source_file = None
-        target_file = None
-        for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']:
-            if (UPLOAD_DIR / f"{req.source_id}{ext}").exists():
-                source_file = UPLOAD_DIR / f"{req.source_id}{ext}"
-            if (UPLOAD_DIR / f"{req.target_id}{ext}").exists():
-                target_file = UPLOAD_DIR / f"{req.target_id}{ext}"
+            # Find actual files with extensions
+            source_file = None
+            target_file = None
+            for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']:
+                if (UPLOAD_DIR / f"{req.source_id}{ext}").exists():
+                    source_file = UPLOAD_DIR / f"{req.source_id}{ext}"
+                if (UPLOAD_DIR / f"{req.target_id}{ext}").exists():
+                    target_file = UPLOAD_DIR / f"{req.target_id}{ext}"
 
-        if not source_file:
-            raise Exception(f"Source file not found for ID: {req.source_id}")
+            if not source_file:
+                raise Exception(f"Source file not found for ID: {req.source_id}")
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            # Step 1: Upload source file to engine
-            with open(source_file, "rb") as sf:
-                src_resp = await client.post(
-                    f"{ENGINE_URL}/upload",
-                    files={"file": (source_file.name, sf, "image/jpeg")},
-                )
-            if src_resp.status_code != 200:
-                raise Exception(f"Engine upload source failed: {src_resp.text}")
-            engine_source_id = src_resp.json()["file_id"]
-
-            # Step 2: Upload target file to engine (if needed)
-            engine_target_id = None
-            if target_file:
-                with open(target_file, "rb") as tf:
-                    tgt_resp = await client.post(
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                # Step 1: Upload source file to engine
+                with open(source_file, "rb") as sf:
+                    src_resp = await client.post(
                         f"{ENGINE_URL}/upload",
-                        files={"file": (target_file.name, tf, "image/jpeg")},
+                        files={"file": (source_file.name, sf, "image/jpeg")},
                     )
-                if tgt_resp.status_code != 200:
-                    raise Exception(f"Engine upload target failed: {tgt_resp.text}")
-                engine_target_id = tgt_resp.json()["file_id"]
+                if src_resp.status_code != 200:
+                    raise Exception(f"Engine upload source failed: {src_resp.text}")
+                engine_source_id = src_resp.json()["file_id"]
 
-            # Step 3: Call appropriate engine endpoint based on swap type
-            if req.swap_type == "background":
-                resp = await client.post(
-                    f"{ENGINE_URL}/background-remove",
-                    json={"file_id": engine_source_id, "method": "auto"},
-                )
-            elif req.swap_type == "filter":
-                resp = await client.post(
-                    f"{ENGINE_URL}/apply-filter",
-                    json={"file_id": engine_source_id, "filter_name": "enhance", "intensity": 1.0},
-                )
-            elif req.swap_type == "portrait":
-                resp = await client.post(
-                    f"{ENGINE_URL}/live-portrait",
-                    json={"source_id": engine_source_id, "expression": "smile", "intensity": 1.0, "num_frames": 30},
-                )
-            elif req.swap_type in ("voice", "voice_clone"):
-                resp = await client.post(
-                    f"{ENGINE_URL}/voice-clone/convert",
-                    json={"file_id": engine_source_id, "pitch_shift": 0.0},
-                )
-            else:
-                # Default: face swap (requires target)
-                if not engine_target_id:
-                    raise Exception("Face swap requires a target image")
-                resp = await client.post(
-                    f"{ENGINE_URL}/swap",
-                    json={
-                        "source_id": engine_source_id,
-                        "target_id": engine_target_id,
-                        "no_watermark": True,
-                    },
-                )
+                # Step 2: Upload target file to engine (if needed)
+                engine_target_id = None
+                if target_file:
+                    with open(target_file, "rb") as tf:
+                        tgt_resp = await client.post(
+                            f"{ENGINE_URL}/upload",
+                            files={"file": (target_file.name, tf, "image/jpeg")},
+                        )
+                    if tgt_resp.status_code != 200:
+                        raise Exception(f"Engine upload target failed: {tgt_resp.text}")
+                    engine_target_id = tgt_resp.json()["file_id"]
 
-            if resp.status_code == 200:
-                result_data = resp.json()
-                output_id = result_data.get("output_id", "")
-                output_url = result_data.get("output_url", "")
-
-                # Download result from engine
-                if output_url:
-                    result_resp = await client.get(f"{ENGINE_URL}{output_url}")
-                    if result_resp.status_code == 200:
-                        result_path = UPLOAD_DIR / f"{swap.id}_result.jpg"
-                        result_path.write_bytes(result_resp.content)
-                        swap.output_file = str(result_path)
-                        swap.status = "completed"
-                        db.commit()
-                    else:
-                        raise Exception(f"Failed to download result from engine: {result_resp.status_code}")
+                # Step 3: Call appropriate engine endpoint based on swap type
+                if req.swap_type == "background":
+                    resp = await client.post(
+                        f"{ENGINE_URL}/background-remove",
+                        json={"file_id": engine_source_id, "method": "auto"},
+                    )
+                elif req.swap_type == "filter":
+                    resp = await client.post(
+                        f"{ENGINE_URL}/apply-filter",
+                        json={"file_id": engine_source_id, "filter_name": "enhance", "intensity": 1.0},
+                    )
+                elif req.swap_type == "portrait":
+                    resp = await client.post(
+                        f"{ENGINE_URL}/live-portrait",
+                        json={"source_id": engine_source_id, "expression": "smile", "intensity": 1.0, "num_frames": 30},
+                    )
+                elif req.swap_type in ("voice", "voice_clone"):
+                    resp = await client.post(
+                        f"{ENGINE_URL}/voice-clone/convert",
+                        json={"file_id": engine_source_id, "pitch_shift": 0.0},
+                    )
                 else:
-                    raise Exception("Engine returned no output URL")
-            else:
-                raise Exception(f"Engine processing failed: {resp.status_code} - {resp.text}")
+                    # Default: face swap (requires target)
+                    if not engine_target_id:
+                        raise Exception("Face swap requires a target image")
+                    resp = await client.post(
+                        f"{ENGINE_URL}/swap",
+                        json={
+                            "source_id": engine_source_id,
+                            "target_id": engine_target_id,
+                            "no_watermark": True,
+                        },
+                    )
 
-    except Exception as e:
-        error_message = str(e)
+                if resp.status_code == 200:
+                    result_data = resp.json()
+                    output_id = result_data.get("output_id", "")
+                    output_url = result_data.get("output_url", "")
+
+                    # Download result from engine
+                    if output_url:
+                        result_resp = await client.get(f"{ENGINE_URL}{output_url}")
+                        if result_resp.status_code == 200:
+                            result_path = UPLOAD_DIR / f"{swap.id}_result.jpg"
+                            result_path.write_bytes(result_resp.content)
+                            swap.output_file = str(result_path)
+                            swap.status = "completed"
+                            db.commit()
+                        else:
+                            raise Exception(f"Failed to download result from engine: {result_resp.status_code}")
+                    else:
+                        raise Exception("Engine returned no output URL")
+                else:
+                    raise Exception(f"Engine processing failed: {resp.status_code} - {resp.text}")
+
+            break  # Success, exit retry loop
+
+        except httpx.ConnectError as e:
+            error_message = str(e)
+            if _attempt < max_retries - 1:
+                # Try to restart engine on connection failure
+                try:
+                    import subprocess, signal
+                    result = subprocess.run(
+                        ["pgrep", "-f", f"run_persona.py.*--port.*{ENGINE_PORT}"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if not result.stdout.strip():
+                        workdir = Path("/app") if Path("/app").exists() else Path(__file__).parent.parent.parent
+                        subprocess.Popen(
+                            ["python3", "run_persona.py", "--port", str(ENGINE_PORT), "--skip-install"],
+                            cwd=str(workdir),
+                            stdout=open("/app/logs/engine.log", "a"),
+                            stderr=subprocess.STDOUT,
+                            start_new_session=True,
+                        )
+                except Exception:
+                    pass
+                _time.sleep(5 * (_attempt + 1))
+                continue
+            break
+        except Exception as e:
+            error_message = str(e)
+            break
+
+    if error_message and swap.status != "completed":
         swap.status = "failed"
         swap.error_message = error_message
         db.commit()
@@ -1073,6 +1180,57 @@ async def admin_engine_status(admin: Admin = Depends(get_admin_user)):
     except Exception:
         pass
     return {"status": "offline", "engine_url": ENGINE_URL}
+
+
+@app.post("/api/admin/engine/restart")
+async def admin_engine_restart(admin: Admin = Depends(get_admin_user)):
+    global _engine_restart_lock
+    if _engine_restart_lock:
+        return {"status": "already_restarting"}
+    _engine_restart_lock = True
+    try:
+        import subprocess, signal, time as _time
+        # Find and kill existing engine process
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", f"run_persona.py.*--port.*{ENGINE_PORT}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                pids = result.stdout.strip().split("\n")
+                for pid in pids:
+                    try:
+                        os.kill(int(pid), signal.SIGTERM)
+                    except (ProcessLookupError, ValueError):
+                        pass
+                _time.sleep(2)
+        except Exception:
+            pass
+
+        # Start engine
+        workdir = Path("/app") if Path("/app").exists() else Path(__file__).parent.parent.parent
+        subprocess.Popen(
+            ["python3", "run_persona.py", "--port", str(ENGINE_PORT), "--skip-install"],
+            cwd=str(workdir),
+            stdout=open("/app/logs/engine.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+        # Wait for it to come up
+        for _ in range(30):
+            _time.sleep(2)
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    resp = await client.get(f"{ENGINE_URL}/health")
+                    if resp.status_code == 200:
+                        return {"status": "restarted", "engine_url": ENGINE_URL}
+            except Exception:
+                pass
+
+        return {"status": "restart_initiated", "engine_url": ENGINE_URL, "note": "Engine may still be loading models"}
+    finally:
+        _engine_restart_lock = False
 
 
 # ─── Admin: API Keys ────────────────────────────────────────────────────────
@@ -1627,6 +1785,7 @@ class VastDeployRequest(BaseModel):
     image: str = "personastudio/engine:latest"
     disk: int = 50
     label: str = "persona-engine"
+    ssh_key: Optional[str] = None
 
 
 @app.get("/api/admin/vast/config")
@@ -1642,6 +1801,7 @@ def vast_get_config(admin: Admin = Depends(get_admin_user), db: Session = Depend
         "gpu_preference": settings.get("vast_gpu_preference", "RTX 4090"),
         "max_dph": float(settings.get("vast_max_dph", "1.0")),
         "engine_image": settings.get("vast_engine_image", "personastudio/engine:latest"),
+        "ssh_pubkey": settings.get("vast_ssh_pubkey", ""),
     }
 
 
@@ -1662,6 +1822,7 @@ def vast_update_config(
         "vast_gpu_preference": body.get("gpu_preference", "RTX 4090"),
         "vast_max_dph": str(body.get("max_dph", 1.0)),
         "vast_engine_image": body.get("engine_image", "personastudio/engine:latest"),
+        "vast_ssh_pubkey": body.get("ssh_pubkey", ""),
     }
 
     for key, value in mappings.items():
@@ -1768,7 +1929,8 @@ async def vast_deploy_instance(
         label=req.label,
         runtype="ssh_direct",
         env={"-p 8000:8000": "1"},
-        onstart="echo 'Persona Engine Starting...' && nvidia-smi",
+        ssh_key=req.ssh_key,
+        onstart="mkdir -p /app/logs && cd /app && nohup bash start-all.sh > /app/logs/startup.log 2>&1 &",
     )
 
     return {

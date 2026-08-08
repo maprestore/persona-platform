@@ -30,6 +30,28 @@ class VastAI:
             resp.raise_for_status()
             return resp.json()
 
+    # ── SSH Key Management ───────────────────────────────────────────────
+
+    async def register_ssh_key(self, ssh_pubkey: str) -> Dict:
+        """Register an SSH public key with the Vast.ai account.
+
+        Per the Vast.ai API docs, SSH keys must be registered BEFORE creating
+        an instance. Duplicate keys are silently accepted by the API.
+        """
+        try:
+            return await self._request("POST", "/ssh", {"ssh_key": ssh_pubkey})
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                body = e.response.json()
+                if body.get("error") == "duplicate_key" or "already" in str(body.get("msg", "")).lower():
+                    return {"success": True, "already_registered": True}
+            raise
+
+    async def list_ssh_keys(self) -> List[Dict]:
+        """List SSH keys registered with the Vast.ai account."""
+        result = await self._request("GET", "/ssh/")
+        return result.get("keys", result.get("ssh_keys", []))
+
     # ── Instance Management ──────────────────────────────────────────────
 
     async def list_instances(self) -> List[Dict]:
@@ -95,9 +117,18 @@ class VastAI:
         runtype: str = "ssh_direct",
         env: Dict[str, str] = None,
         onstart: str = "",
+        ssh_key: Optional[str] = None,
         label: str = "persona-engine",
     ) -> Dict:
-        """Create (rent) a GPU instance from an offer."""
+        """Create (rent) a GPU instance from an offer.
+
+        If ``ssh_key`` is provided, it is registered with Vast.ai via
+        POST /api/v0/ssh BEFORE creating the instance (the API requires
+        keys to be registered ahead of time, otherwise SSH fails with
+        "Permission denied").
+        """
+        if ssh_key:
+            await self.register_ssh_key(ssh_key)
         data = {
             "image": image,
             "disk": disk,
